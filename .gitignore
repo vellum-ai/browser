@@ -1,0 +1,12 @@
+# Compiled app bundles. The assistant's plugin source watcher builds
+# apps/<app>/src into apps/<app>/dist; generated output is never committed.
+apps/*/dist/
+
+# Runtime-owned plugin state, created in the installed copy — never in the repo.
+data/
+install-meta.json
+.disabled
+
+node_modules/
+*.log
+.DS_Store

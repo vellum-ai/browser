@@ -1,0 +1,8 @@
+{
+  "sessionId": "browser-app",
+  "browserMode": "auto",
+  "homeUrl": "",
+  "searchUrlTemplate": "https://duckduckgo.com/?q={query}",
+  "commandTimeoutMs": 60000,
+  "assistantBin": ""
+}

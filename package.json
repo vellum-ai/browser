@@ -1,0 +1,29 @@
+{
+  "name": "browser",
+  "version": "0.1.0",
+  "description": "A real browser inside your assistant's workspace panel — navigate, click, type, and read pages from an app, driven by the assistant's own browser backend.",
+  "license": "MIT",
+  "type": "module",
+  "homepage": "https://github.com/vellum-ai/browser",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/vellum-ai/browser.git"
+  },
+  "engines": {
+    "node": ">=20.12.0"
+  },
+  "scripts": {
+    "test": "bun test",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@vellumai/plugin-api": "^0.11.0"
+  },
+  "vellum": {},
+  "devDependencies": {
+    "@types/bun": "^1.3.14",
+    "@vellumai/plugin-api": "^0.11.0",
+    "preact": "^10.29.7",
+    "typescript": "^7.0.2"
+  }
+}
