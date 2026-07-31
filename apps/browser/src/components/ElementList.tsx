@@ -35,6 +35,10 @@ const SHOWN_ATTRS = ["href", "placeholder", "type", "checked", "expanded", "disa
  * Element ids are only valid for the collection they came from. Each response
  * carries a fresh one, so the list re-renders after every action and acting on
  * a stale id fails loudly rather than hitting whatever inherited it.
+ *
+ * The per-row input is deliberately not a `<form>`: the app's iframe is
+ * sandboxed without `allow-forms`, so a submission is blocked and its event
+ * never fires. Enter is handled explicitly instead.
  */
 export function ElementList({
   elements,
@@ -129,6 +133,18 @@ function ElementRow({ element, busy, open, active, onToggle, onHover, onAct }: R
     value: element.attrs[key] as string,
   }));
 
+  /** Type-and-submit, or pick the option — whichever this row's control is. */
+  const commit = () => {
+    if (draft.trim() === "" || busy) {
+      return;
+    }
+    onAct(
+      takesText
+        ? { action: "type", elementId: element.eid, text: draft, pressEnter: true }
+        : { action: "select-option", elementId: element.eid, label: draft },
+    );
+  };
+
   const classes = ["element", open ? "open" : "", active ? "active" : ""]
     .filter((name) => name !== "")
     .join(" ");
@@ -170,31 +186,19 @@ function ElementRow({ element, busy, open, active, onToggle, onHover, onAct }: R
           </div>
 
           {(takesText || takesOption) && (
-            <form
-              class="element-form"
-              onSubmit={(event) => {
-                event.preventDefault();
-                if (draft.trim() === "") {
-                  return;
-                }
-                onAct(
-                  takesText
-                    ? {
-                        action: "type",
-                        elementId: element.eid,
-                        text: draft,
-                        pressEnter: true,
-                      }
-                    : { action: "select-option", elementId: element.eid, label: draft },
-                );
-              }}
-            >
+            <div class="element-form">
               <input
                 type="text"
                 value={draft}
                 placeholder={takesText ? "Text to type" : "Option label"}
                 aria-label={takesText ? "Text to type" : "Option label"}
                 onInput={(event) => setDraft(event.currentTarget.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    commit();
+                  }
+                }}
               />
               {takesText ? (
                 <>
@@ -208,16 +212,26 @@ function ElementRow({ element, busy, open, active, onToggle, onHover, onAct }: R
                   >
                     Type
                   </button>
-                  <button type="submit" class="row-action primary" disabled={busy}>
+                  <button
+                    type="button"
+                    class="row-action primary"
+                    disabled={busy || draft.trim() === ""}
+                    onClick={commit}
+                  >
                     Type + Enter
                   </button>
                 </>
               ) : (
-                <button type="submit" class="row-action primary" disabled={busy}>
+                <button
+                  type="button"
+                  class="row-action primary"
+                  disabled={busy || draft.trim() === ""}
+                  onClick={commit}
+                >
                   Select
                 </button>
               )}
-            </form>
+            </div>
           )}
 
           <div class="element-actions">

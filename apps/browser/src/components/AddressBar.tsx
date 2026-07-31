@@ -25,6 +25,12 @@ interface Props {
  * navigation can take seconds, and rewriting the input from under someone who
  * has started typing the next URL is the one thing an address bar must not do.
  * The draft resyncs when the loaded page changes and the field is not focused.
+ *
+ * Deliberately not a `<form>`. The app runs in an iframe sandboxed with
+ * `allow-scripts` and no `allow-forms`, so the browser blocks the submission
+ * outright and the `submit` event never fires — the button and the Enter key
+ * would both silently do nothing. Submitting is wired to a click handler and an
+ * explicit Enter key handler instead.
  */
 export function AddressBar({
   value,
@@ -45,19 +51,18 @@ export function AddressBar({
     }
   }, [value]);
 
+  const submit = () => {
+    const trimmed = draft.trim();
+    if (trimmed === "" || busy) {
+      return;
+    }
+    onChange(trimmed);
+    onSubmit(trimmed);
+    input.current?.blur();
+  };
+
   return (
-    <form
-      class="addressbar"
-      onSubmit={(event) => {
-        event.preventDefault();
-        const trimmed = draft.trim();
-        if (trimmed !== "") {
-          onChange(trimmed);
-          onSubmit(trimmed);
-          input.current?.blur();
-        }
-      }}
-    >
+    <div class="addressbar">
       <div class="nav">
         <button
           type="button"
@@ -104,6 +109,12 @@ export function AddressBar({
         placeholder="Enter a URL or search"
         onInput={(event) => setDraft(event.currentTarget.value)}
         onKeyDown={(event) => {
+          if (event.key === "Enter") {
+            // Enter would normally submit the form this used to be. It is not
+            // one (see above), so the key is handled here.
+            event.preventDefault();
+            submit();
+          }
           if (event.key === "Escape") {
             setDraft(value);
             input.current?.blur();
@@ -111,10 +122,15 @@ export function AddressBar({
         }}
       />
 
-      <button type="submit" class="go" disabled={busy || draft.trim() === ""}>
+      <button
+        type="button"
+        class="go"
+        onClick={submit}
+        disabled={busy || draft.trim() === ""}
+      >
         {busy ? "Working…" : "Open"}
       </button>
-    </form>
+    </div>
   );
 }
 
