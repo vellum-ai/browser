@@ -75,22 +75,39 @@ carries a fresh one.
 
 A plugin's dependencies install with `--ignore-scripts`, so Playwright's own
 postinstall never runs and a fresh install has no browser binary. Resolution
-mirrors what the assistant does for its own local backend:
+walks four options, best first:
 
-1. A Google Chrome already on the machine, if there is one.
-2. Otherwise Chrome for Testing, downloaded on demand — a few minutes, once.
-3. If the system Chrome will not start, Chrome for Testing as the fallback.
+1. A Google Chrome already on the machine.
+2. Playwright's own Chrome for Testing, if the pinned revision is present.
+3. A standalone Chromium the image ships (`/opt/pw-browsers/chromium`,
+   `/usr/bin/chromium`, …). Playwright resolves its browser by exact revision,
+   so a perfectly good Chromium at a plain path is invisible to it — and
+   driving one beats downloading a second copy of the same browser.
+4. Otherwise Chrome for Testing, downloaded on demand — a few minutes, once.
+
+That download runs **this plugin's** Playwright CLI by absolute path, not
+`bunx playwright`. `bunx` resolves against the working directory, which belongs
+to the daemon and not to the plugin, so it misses the copy in `node_modules/`
+and fetches whatever the registry serves — downloading a browser at *that*
+version's revision while `executablePath()` still points at the one this package
+pins. The install appears to succeed and the browser is still missing.
 
 `init` kicks this off at boot so the wait is paid in the background rather than
-by whoever types the first URL. It does not block: a request that arrives
-mid-launch joins the launch already running, and one that arrives after a failed
-launch retries it and gets the real error back.
+by whoever types the first URL. It does not block: a request arriving mid-launch
+joins the launch already running.
+
+When a launch fails, the reason is kept and surfaced. The app shows it with the
+remediation the route reported and a **Retry** button (`POST /start`), so a
+machine that gains a Chromium — or a download that fails once — does not need a
+daemon restart to recover.
 
 ## The app
 
 - **Address bar** — a URL, a bare host (`example.com:8080/health` works), or a
   search phrase, which goes to DuckDuckGo. Only `http` and `https` are opened;
   `javascript:`, `data:`, and `file:` are refused.
+- **Browser state** — before a page is open, a line says whether the browser is
+  ready, starting, or down. Down shows the reason and a Retry button.
 - **The page** — click an element, or click anywhere. Hovering an element
   highlights it in the list beside it, and vice versa.
 - **Back / forward / reload** — the page's real history.
@@ -122,7 +139,8 @@ URL and no auth and fails.
 
 | Route       | Method | Purpose                                                                          |
 | ----------- | ------ | -------------------------------------------------------------------------------- |
-| `/status`   | GET    | Whether the browser is up and which Chromium backs it. Never launches.           |
+| `/status`   | GET    | Whether the browser is up, which Chromium backs it, and why a launch failed. Never launches. |
+| `/start`    | POST   | Start the browser, or retry after a failed launch. Answers like `/status`.       |
 | `/navigate` | POST   | `{ input }` — raw address-bar value. Returns the page that loaded.               |
 | `/view`     | GET    | Re-read the current page. `?fullPage=1` for the whole scrollable page.           |
 | `/act`      | POST   | `{ action, … }` — click, click-at, hover, type, press-key, scroll, select-option, back, forward, reload. |

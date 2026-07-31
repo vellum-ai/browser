@@ -71,6 +71,32 @@ export class BrowserError extends Error {
 
 // ── Chrome resolution ────────────────────────────────────────────────
 
+/** Where the Chromium being driven came from. */
+export type BrowserSource =
+  /** Google Chrome, already installed on this machine. */
+  | "system-chrome"
+  /** Playwright's own build, at the revision this package pins. */
+  | "chrome-for-testing"
+  /** A standalone Chromium the image ships, outside Playwright's registry. */
+  | "bundled-chromium"
+  /** Nothing yet — the next launch downloads Chrome for Testing. */
+  | "none";
+
+/**
+ * Chromium builds that live outside Playwright's registry.
+ *
+ * Playwright resolves its browser by exact revision (`chromium-1208/...`), so a
+ * perfectly good Chromium sitting at a plain path is invisible to it. Container
+ * images routinely ship exactly that, and driving one is far better than
+ * downloading a second copy of the same browser.
+ */
+const STANDALONE_CHROMIUM = [
+  "/opt/pw-browsers/chromium",
+  "/usr/bin/chromium",
+  "/usr/bin/chromium-browser",
+  "/snap/bin/chromium",
+];
+
 /** A Google Chrome already installed on this machine, if there is one. */
 function findSystemChrome(): string | null {
   const candidates: string[] = [];
@@ -99,26 +125,101 @@ function canDisplayGui(): boolean {
   return Boolean(process.env.DISPLAY ?? process.env.WAYLAND_DISPLAY);
 }
 
-/** True when Playwright's own Chromium build is present on disk. */
-function hasChromeForTesting(): boolean {
+/** Playwright's own Chromium build, at the revision this package pins. */
+function findChromeForTesting(): string | null {
   try {
-    return existsSync(chromium.executablePath());
+    const path = chromium.executablePath();
+    return existsSync(path) ? path : null;
   } catch {
     // executablePath() throws when the browser registry is missing entirely.
-    return false;
+    return null;
   }
 }
 
+/** What this machine can launch right now, best first. */
+export function resolveBrowser(): { executablePath: string | null; source: BrowserSource } {
+  const systemChrome = findSystemChrome();
+  if (systemChrome !== null) {
+    return { executablePath: systemChrome, source: "system-chrome" };
+  }
+  // Playwright resolves its own build itself, so this deliberately reports no
+  // explicit path — passing one would pin the launch to a copy Playwright is
+  // already responsible for locating.
+  if (findChromeForTesting() !== null) {
+    return { executablePath: null, source: "chrome-for-testing" };
+  }
+  const standalone = STANDALONE_CHROMIUM.find((candidate) => existsSync(candidate));
+  if (standalone !== undefined) {
+    return { executablePath: standalone, source: "bundled-chromium" };
+  }
+  return { executablePath: null, source: "none" };
+}
+
 /**
- * Download Chrome for Testing. Only reached when no system Chrome was found,
- * because a plugin install runs with `--ignore-scripts` and never fetches it.
+ * A JS runtime that can execute Playwright's CLI.
+ *
+ * `process.execPath` is the daemon, which in a packaged install is the compiled
+ * assistant binary and cannot run a script — so it is used only when it really
+ * is a JS runtime, and PATH is consulted otherwise.
+ */
+function findRunner(): string | null {
+  const own = process.execPath;
+  const name = own.slice(own.lastIndexOf("/") + 1);
+  if (name === "bun" || name === "node") {
+    return own;
+  }
+  for (const dir of (process.env.PATH ?? "").split(":")) {
+    for (const candidate of ["bun", "node"]) {
+      if (dir !== "" && existsSync(join(dir, candidate))) {
+        return join(dir, candidate);
+      }
+    }
+  }
+  return null;
+}
+
+/**
+ * Download Chrome for Testing.
+ *
+ * Reached when nothing else on the machine can be driven, because a plugin
+ * installs with `--ignore-scripts` and Playwright's own postinstall never runs.
+ *
+ * This invokes **this plugin's** Playwright CLI by absolute path, rather than
+ * `bunx playwright`. `bunx` resolves against the working directory, which
+ * belongs to the daemon and not to the plugin, so it would miss the copy in
+ * `node_modules/` and fetch whatever version the registry serves — which
+ * downloads a browser at *that* version's revision while `executablePath()`
+ * keeps pointing at the revision this package pins. The install appears to
+ * succeed and the browser is still missing.
+ *
+ * `--with-deps` is also deliberately absent: it shells out to the system
+ * package manager and needs root, so on a container without it the whole
+ * install fails rather than just the system-library step.
  */
 async function installChromeForTesting(): Promise<void> {
-  if (hasChromeForTesting()) {
-    return;
+  const cli = join(PLUGIN_DIR, "node_modules", "playwright", "cli.js");
+  if (!existsSync(cli)) {
+    throw new BrowserError(
+      "Playwright is not installed in this plugin, so its browser cannot be fetched.",
+      {
+        status: 503,
+        hint: "Reinstall the plugin so its dependencies are installed.",
+      },
+    );
   }
 
-  const proc = Bun.spawn(["bunx", "playwright", "install", "--with-deps", "chromium"], {
+  const runner = findRunner();
+  if (runner === null) {
+    throw new BrowserError("No `bun` or `node` on PATH to run Playwright's installer.", {
+      status: 503,
+      hint: `Install Chromium manually: \`node ${cli} install chromium\`.`,
+    });
+  }
+
+  const proc = Bun.spawn([runner, cli, "install", "chromium"], {
+    // The plugin directory, so the CLI resolves its own package and writes into
+    // the registry `executablePath()` reads from.
+    cwd: PLUGIN_DIR,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -145,7 +246,20 @@ async function installChromeForTesting(): Promise<void> {
       `Could not install Chromium: ${stderr === "" ? `exited with code ${exitCode}` : stderr}`,
       {
         status: 503,
-        hint: "Run `bunx playwright install chromium` and reload the plugin.",
+        hint: `Install it manually: \`${runner} ${cli} install chromium\`.`,
+      },
+    );
+  }
+
+  // An installer that exits 0 without producing the pinned revision is the
+  // exact failure this function exists to prevent, so it is checked rather
+  // than assumed.
+  if (findChromeForTesting() === null) {
+    throw new BrowserError(
+      "Playwright's installer finished but its Chromium is still missing.",
+      {
+        status: 503,
+        hint: `Run \`${runner} ${cli} install chromium\` and check its output.`,
       },
     );
   }
@@ -155,6 +269,15 @@ async function installChromeForTesting(): Promise<void> {
 
 let context: BrowserContext | null = null;
 let launching: Promise<BrowserContext> | null = null;
+
+/**
+ * Why the last launch failed, kept so the app can show it.
+ *
+ * Without this a failed launch is only a log line: the app sees "not running"
+ * and cannot say why, which is exactly the dead end where the address bar
+ * appears to do nothing. It is cleared on a successful launch.
+ */
+let lastError: BrowserError | null = null;
 
 /**
  * Launch the persistent context.
@@ -169,17 +292,27 @@ async function launch(): Promise<BrowserContext> {
   const headless = !canDisplayGui();
   const options = { headless, viewport: { ...VIEWPORT } };
 
-  const systemChrome = findSystemChrome();
-  if (systemChrome !== null) {
+  const resolved = resolveBrowser();
+
+  if (resolved.source !== "none") {
     try {
       return await chromium.launchPersistentContext(PROFILE_DIR, {
         ...options,
-        executablePath: systemChrome,
+        ...(resolved.executablePath === null
+          ? {}
+          : { executablePath: resolved.executablePath }),
       });
-    } catch {
-      // Chrome is installed but will not start (a partial install, a version
-      // the driver cannot drive). Chrome for Testing is the known-good build,
-      // so fall through to it rather than failing outright.
+    } catch (err) {
+      // The browser is on disk but will not start — a partial install, a build
+      // the driver cannot drive, missing system libraries. Chrome for Testing
+      // is the known-good build, so fall through and fetch it; but if that is
+      // what just failed, there is nothing left to try.
+      if (resolved.source === "chrome-for-testing") {
+        throw new BrowserError(
+          `Chromium is installed but would not start: ${err instanceof Error ? err.message : String(err)}`,
+          { status: 503 },
+        );
+      }
     }
   }
 
@@ -205,6 +338,7 @@ export async function ensureContext(): Promise<BrowserContext> {
   launching = launch()
     .then((launched) => {
       context = launched;
+      lastError = null;
       // A context that dies on its own (the user closed the window, the process
       // crashed) must not be handed out again — clear it so the next call
       // relaunches instead of driving a dead handle.
@@ -213,11 +347,32 @@ export async function ensureContext(): Promise<BrowserContext> {
       });
       return launched;
     })
+    .catch((err: unknown) => {
+      lastError =
+        err instanceof BrowserError
+          ? err
+          : new BrowserError(err instanceof Error ? err.message : String(err), {
+              status: 503,
+            });
+      throw lastError;
+    })
     .finally(() => {
       launching = null;
     });
 
   return launching;
+}
+
+/** Why the last launch failed, or null if none has. */
+export function getLastError(): { message: string; hint: string | null } | null {
+  return lastError === null
+    ? null
+    : { message: lastError.message, hint: lastError.hint ?? null };
+}
+
+/** True while a launch is in progress, so the app can say so rather than guess. */
+export function isStarting(): boolean {
+  return launching !== null;
 }
 
 /**
@@ -242,11 +397,8 @@ export function isRunning(): boolean {
 }
 
 /** Where the browser executable came from, for the status route. */
-export function describeBrowser(): { source: "system-chrome" | "chrome-for-testing" | "none" } {
-  if (findSystemChrome() !== null) {
-    return { source: "system-chrome" };
-  }
-  return { source: hasChromeForTesting() ? "chrome-for-testing" : "none" };
+export function describeBrowser(): { source: BrowserSource } {
+  return { source: resolveBrowser().source };
 }
 
 /**

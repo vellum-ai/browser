@@ -10,6 +10,7 @@ import {
   fetchView,
   navigate,
   relayPrompt,
+  startBrowser,
 } from "../api";
 import type { Action, ExtractBody, PageView, StatusBody } from "../api";
 import { AddressBar } from "./AddressBar";
@@ -44,6 +45,7 @@ export function App() {
   const [fullPage, setFullPage] = useState(false);
   const [live, setLive] = useState(false);
   const [activeEid, setActiveEid] = useState<string | null>(null);
+  const [starting, setStarting] = useState(false);
 
   // The live-refresh interval and the async operations both need to know
   // whether something is already in flight, and neither can read it out of the
@@ -74,6 +76,14 @@ export function App() {
         }
       } catch (err) {
         setError(asApiError(err));
+        // A failed operation may mean the browser died underneath us, which is
+        // a retry state rather than a one-off error. Re-read status so the
+        // banner can offer the button instead of leaving a dead end.
+        void fetchStatus()
+          .then(setStatus)
+          .catch(() => {
+            // Status is a nicety here; the operation's own error already shows.
+          });
       } finally {
         inFlight.current = false;
         setBusy(false);
@@ -174,6 +184,19 @@ export function App() {
     setText(null);
   }, []);
 
+  /** Start the browser, or try again after a failed launch. */
+  const retry = useCallback(async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      setStatus(await startBrowser());
+    } catch (err) {
+      setError(asApiError(err));
+    } finally {
+      setStarting(false);
+    }
+  }, []);
+
   const end = useCallback(async () => {
     setBusy(true);
     try {
@@ -214,17 +237,15 @@ export function App() {
         onReload={() => perform({ action: "reload" })}
       />
 
-      {status !== null && view === null && <StartupBanner status={status} />}
+      {status !== null && view === null && (
+        <StartupBanner status={status} retrying={starting} onRetry={() => void retry()} />
+      )}
       {error !== null && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {view === null ? (
         <div class="empty">
-          <h1>A browser, in the panel</h1>
-          <p>
-            Type a URL or a search above to open a page. It runs in this plugin&rsquo;s own
-            Chromium, with its own profile, so signing in somewhere here stays signed in the
-            next time you open it.
-          </p>
+          <h1>Welcome to my browser</h1>
+          <p>Type a URL or a search above to open a page.</p>
         </div>
       ) : (
         <>
