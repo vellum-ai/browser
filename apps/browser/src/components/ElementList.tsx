@@ -5,7 +5,10 @@ import type { Action, PageElement } from "../api";
 interface Props {
   elements: PageElement[];
   busy: boolean;
+  /** The element highlighted on the capture, kept in sync with this list. */
+  activeEid: string | null;
   onAct(action: Action): void;
+  onHoverElement(eid: string | null): void;
 }
 
 /** Roles that take typed text. */
@@ -20,17 +23,26 @@ const SHOWN_ATTRS = ["href", "placeholder", "type", "checked", "expanded", "disa
 /**
  * The interactive elements on the page, and the controls that act on them.
  *
- * This is the app's real input surface. A screenshot cannot be clicked (see
- * `Viewport`), so every interaction is addressed by the element id the snapshot
- * assigned — which means this list is not a debug view of the page, it is how
- * the page is used.
+ * The capture is clickable now, so this list is no longer the only way to
+ * reach an element — but it is still the precise one. It names what each
+ * control is, reaches things a click cannot (typing, option-picking, hover),
+ * and stays usable when a page renders nothing worth pointing at.
  *
- * Element ids are only valid for the snapshot they came from. Each response
- * carries a fresh one, so the list re-renders after every action and a click on
- * a stale id is reported by the backend rather than silently hitting the wrong
- * node.
+ * Hovering a row highlights the same element on the capture, and vice versa, so
+ * the two views stay legible as one page rather than two lists of the same
+ * thing.
+ *
+ * Element ids are only valid for the collection they came from. Each response
+ * carries a fresh one, so the list re-renders after every action and acting on
+ * a stale id fails loudly rather than hitting whatever inherited it.
  */
-export function ElementList({ elements, busy, onAct }: Props) {
+export function ElementList({
+  elements,
+  busy,
+  activeEid,
+  onAct,
+  onHoverElement,
+}: Props) {
   const [filter, setFilter] = useState("");
   const [openEid, setOpenEid] = useState<string | null>(null);
 
@@ -77,14 +89,16 @@ export function ElementList({ elements, busy, onAct }: Props) {
       {visible.length === 0 ? (
         <p class="muted pad">Nothing matches “{filter.trim()}”.</p>
       ) : (
-        <ul class="elements">
+        <ul class="elements" onMouseLeave={() => onHoverElement(null)}>
           {visible.map((element) => (
             <ElementRow
               key={element.eid}
               element={element}
               busy={busy}
               open={openEid === element.eid}
+              active={activeEid === element.eid}
               onToggle={() => setOpenEid(openEid === element.eid ? null : element.eid)}
+              onHover={() => onHoverElement(element.eid)}
               onAct={onAct}
             />
           ))}
@@ -98,11 +112,13 @@ interface RowProps {
   element: PageElement;
   busy: boolean;
   open: boolean;
+  active: boolean;
   onToggle(): void;
+  onHover(): void;
   onAct(action: Action): void;
 }
 
-function ElementRow({ element, busy, open, onToggle, onAct }: RowProps) {
+function ElementRow({ element, busy, open, active, onToggle, onHover, onAct }: RowProps) {
   const [draft, setDraft] = useState(element.value ?? "");
   const takesText = TEXT_ROLES.has(element.role);
   const takesOption = OPTION_ROLES.has(element.role);
@@ -113,8 +129,12 @@ function ElementRow({ element, busy, open, onToggle, onAct }: RowProps) {
     value: element.attrs[key] as string,
   }));
 
+  const classes = ["element", open ? "open" : "", active ? "active" : ""]
+    .filter((name) => name !== "")
+    .join(" ");
+
   return (
-    <li class={open ? "element open" : "element"}>
+    <li class={classes} onMouseEnter={onHover}>
       <div class="element-head">
         <button
           type="button"
@@ -242,10 +262,7 @@ function ElementRow({ element, busy, open, onToggle, onAct }: RowProps) {
  */
 function describeUnnamed(element: PageElement): string {
   const candidate =
-    element.attrs.placeholder ??
-    element.attrs.title ??
-    element.attrs.href ??
-    element.attrs.type;
+    element.attrs.placeholder ?? element.attrs.title ?? element.attrs.href ?? element.attrs.type;
   return candidate === undefined ? `(unnamed ${element.role})` : truncate(candidate, 60);
 }
 

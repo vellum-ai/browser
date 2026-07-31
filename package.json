@@ -1,7 +1,7 @@
 {
   "name": "browser",
   "version": "0.1.0",
-  "description": "A real browser inside your assistant's workspace panel — navigate, click, type, and read pages from an app, driven by the assistant's own browser backend.",
+  "description": "A real browser inside your assistant's workspace panel — navigate, click, type, and read pages from an app, driving Playwright in-process.",
   "license": "MIT",
   "type": "module",
   "homepage": "https://github.com/vellum-ai/browser",
@@ -15,6 +15,9 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "playwright": "1.58.2"
   },
   "peerDependencies": {
     "@vellumai/plugin-api": "^0.11.0"
