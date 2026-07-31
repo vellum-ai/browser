@@ -47,9 +47,18 @@ export interface PageView {
   message: string | null;
 }
 
+export type BrowserSource =
+  | "system-chrome"
+  | "chrome-for-testing"
+  | "bundled-chromium"
+  | "none";
+
 export interface StatusBody {
   running: boolean;
-  source: "system-chrome" | "chrome-for-testing" | "none";
+  starting: boolean;
+  source: BrowserSource;
+  /** Why the last launch failed, when one did. Drives the retry state. */
+  error: { message: string; hint: string | null } | null;
 }
 
 export interface ExtractBody {
@@ -154,6 +163,15 @@ function post<T>(path: string, body: unknown): Promise<T> {
 /** Whether the browser is up, and which Chromium backs it. The first call. */
 export function fetchStatus(): Promise<StatusBody> {
   return request<StatusBody>("/status");
+}
+
+/**
+ * Start the browser, or retry after a failed launch. Answers with the same
+ * shape as `/status`, so a failure comes back as state to render rather than as
+ * a thrown error.
+ */
+export function startBrowser(): Promise<StatusBody> {
+  return post<StatusBody>("/start", {});
 }
 
 /** Load a page from raw address-bar input (a URL, a host, or a search phrase). */
