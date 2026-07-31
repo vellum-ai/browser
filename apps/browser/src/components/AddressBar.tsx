@@ -4,10 +4,8 @@ interface Props {
   /** URL of the page currently loaded. */
   value: string;
   busy: boolean;
-  canGoBack: boolean;
-  canGoForward: boolean;
-  canReload: boolean;
-  searchEnabled: boolean;
+  /** True once a page is open, so history and reload have something to act on. */
+  canNavigate: boolean;
   onChange(value: string): void;
   onSubmit(value: string): void;
   onBack(): void;
@@ -18,6 +16,11 @@ interface Props {
 /**
  * Back, forward, reload, and the address field.
  *
+ * The three buttons drive the page's own session history rather than a stack
+ * this app keeps, so they stay enabled whenever a page is open: whether there
+ * is anywhere to go is something only the page knows, and it answers by
+ * reporting that the move did not happen.
+ *
  * The field is a local draft rather than a controlled mirror of `value`: a
  * navigation can take seconds, and rewriting the input from under someone who
  * has started typing the next URL is the one thing an address bar must not do.
@@ -26,10 +29,7 @@ interface Props {
 export function AddressBar({
   value,
   busy,
-  canGoBack,
-  canGoForward,
-  canReload,
-  searchEnabled,
+  canNavigate,
   onChange,
   onSubmit,
   onBack,
@@ -63,7 +63,7 @@ export function AddressBar({
           type="button"
           class="icon-button"
           onClick={onBack}
-          disabled={!canGoBack || busy}
+          disabled={!canNavigate || busy}
           aria-label="Back"
           title="Back"
         >
@@ -73,7 +73,7 @@ export function AddressBar({
           type="button"
           class="icon-button"
           onClick={onForward}
-          disabled={!canGoForward || busy}
+          disabled={!canNavigate || busy}
           aria-label="Forward"
           title="Forward"
         >
@@ -83,7 +83,7 @@ export function AddressBar({
           type="button"
           class="icon-button"
           onClick={onReload}
-          disabled={!canReload || busy}
+          disabled={!canNavigate || busy}
           aria-label="Reload"
           title="Reload"
         >
@@ -101,7 +101,7 @@ export function AddressBar({
         autocomplete="off"
         autocapitalize="off"
         aria-label="Address"
-        placeholder={searchEnabled ? "Enter a URL or search" : "Enter a URL"}
+        placeholder="Enter a URL or search"
         onInput={(event) => setDraft(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape") {

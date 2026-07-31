@@ -6,7 +6,7 @@
  * human-readable reason and, where one exists, the concrete next step.
  */
 
-import { BrowserCommandError } from "./assistant-cli.js";
+import { BrowserError } from "./browser.js";
 
 /** The error body every failing route returns. */
 export interface ErrorBody {
@@ -31,7 +31,7 @@ export function fail(error: string, status = 400, hint?: string): Response {
 /**
  * Run a route body, mapping a thrown error to a response.
  *
- * `BrowserCommandError` already carries the status and hint it wants. Anything
+ * `BrowserError` already carries the status and hint it wants. Anything
  * else is a bug in this plugin, so it answers 500 with its message rather than
  * letting the dispatcher return a bare 500 with no attribution.
  */
@@ -39,7 +39,7 @@ export async function handle(body: () => Promise<Response>): Promise<Response> {
   try {
     return await body();
   } catch (err) {
-    if (err instanceof BrowserCommandError) {
+    if (err instanceof BrowserError) {
       return fail(err.message, err.status, err.hint);
     }
     const message = err instanceof Error ? err.message : String(err);
@@ -68,7 +68,7 @@ export function requireString(
 ): string {
   const value = body[field];
   if (typeof value !== "string" || value.trim() === "") {
-    throw new BrowserCommandError(`\`${field}\` is required.`, { status: 400 });
+    throw new BrowserError(`\`${field}\` is required.`, { status: 400 });
   }
   return value;
 }

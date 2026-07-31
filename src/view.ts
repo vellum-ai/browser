@@ -1,27 +1,34 @@
 /**
  * Capturing "what the page looks like right now" as one payload.
  *
- * Every route that changes the page ends by returning a fresh view, so the app
+ * Every route that touches the page ends by returning a fresh view, so the app
  * never has to sequence a second request to find out what its click did. A view
- * is a snapshot (the interactive elements, addressable by id) plus a screenshot
- * (what the user sees), which are two separate operations against the same
- * page.
+ * pairs the capture with the element geometry taken from the same page state,
+ * which is what lets the app draw boxes that line up with the image.
  */
 
-import { runBrowserOperation } from "./assistant-cli.js";
-import type { CliScreenshot } from "./assistant-cli.js";
-import type { BrowserAppConfig } from "./config.js";
-import { parseSnapshot } from "./page.js";
-import type { PageElement } from "./page.js";
+import { VIEWPORT, ensurePage } from "./browser.js";
+import { collectSnapshot } from "./snapshot.js";
+import type { PageElement } from "./snapshot.js";
+
+/** JPEG quality for captures. High enough to read small text, small enough to send. */
+const CAPTURE_QUALITY = 80;
 
 /** The payload the app renders after any operation. */
 export interface PageView {
   url: string;
   title: string;
   elements: PageElement[];
-  screenshot: CliScreenshot | null;
-  /** Set when the screenshot failed but the rest of the view is usable. */
+  /** Base64 JPEG of the page, or null when the capture failed. */
+  screenshot: string | null;
+  /** Set when the capture failed but the rest of the view is usable. */
   screenshotError: string | null;
+  /** True when the capture is the whole scrollable page, not just the viewport. */
+  fullPage: boolean;
+  /** Size of the capture in CSS pixels, for mapping element boxes onto it. */
+  capture: { width: number; height: number };
+  /** How far the page is scrolled. */
+  scroll: { x: number; y: number };
   /** Short note about what the last operation did, for the app's status line. */
   message: string | null;
 }
@@ -33,42 +40,61 @@ function errorMessage(err: unknown): string {
 /**
  * Capture the current page as a view.
  *
- * The two operations degrade independently. A snapshot failure is fatal — with
- * no element list there is nothing to interact with, so the error propagates.
- * A screenshot failure is not: some backends and some pages (a PDF viewer, a
- * page mid-navigation) refuse a capture while the accessibility tree is still
- * perfectly readable, and an element list with a placeholder beats an error
- * page.
+ * The two halves degrade independently. Losing the snapshot is fatal — with no
+ * elements there is nothing to interact with. Losing the capture is not: a page
+ * mid-navigation or a PDF viewer can refuse a screenshot while the DOM stays
+ * perfectly readable, and an element list with a placeholder beats an error.
  */
 export async function captureView(
-  config: BrowserAppConfig,
   options: { fullPage?: boolean; message?: string | null } = {},
 ): Promise<PageView> {
-  const snapshotResult = await runBrowserOperation("snapshot", {}, config);
-  const snapshot = parseSnapshot(snapshotResult.content);
+  const page = await ensurePage();
+  const fullPage = options.fullPage === true;
 
-  let screenshot: CliScreenshot | null = null;
+  const snapshot = await collectSnapshot(page);
+
+  let screenshot: string | null = null;
   let screenshotError: string | null = null;
+  let capture: { width: number; height: number } = {
+    width: VIEWPORT.width,
+    height: VIEWPORT.height,
+  };
+
   try {
-    const shot = await runBrowserOperation(
-      "screenshot",
-      options.fullPage === true ? { full_page: true } : {},
-      config,
-    );
-    screenshot = shot.screenshots[0] ?? null;
-    if (screenshot === null) {
-      screenshotError = "The browser returned no image for this page.";
+    const buffer = await page.screenshot({
+      type: "jpeg",
+      quality: CAPTURE_QUALITY,
+      fullPage,
+    });
+    screenshot = buffer.toString("base64");
+
+    if (fullPage) {
+      // A full-page capture is as tall as the document, so the app needs the
+      // real height to scale element boxes against it.
+      const height = await page.evaluate(
+        () => document.documentElement.scrollHeight,
+      );
+      capture = { width: VIEWPORT.width, height };
     }
   } catch (err) {
     screenshotError = errorMessage(err);
   }
 
+  // Whether history can move is deliberately not reported here. Playwright
+  // does not expose the stack, and `window.history.length` cannot distinguish
+  // back from forward and resets on a cross-origin navigation — a button
+  // greyed out on that basis would be wrong as often as it was right. Instead
+  // the buttons stay enabled and the act route says "No page to go back to"
+  // when Playwright reports the move did not happen.
   return {
     url: snapshot.url,
     title: snapshot.title,
     elements: snapshot.elements,
     screenshot,
     screenshotError,
+    fullPage,
+    capture,
+    scroll: snapshot.scroll,
     message: options.message ?? null,
   };
 }

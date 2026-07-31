@@ -1,58 +1,45 @@
 /**
- * `init` hook: validate config and report whether the plugin can reach the
- * assistant CLI it drives the browser through.
+ * `init` hook: get the browser running.
  *
- * The plugin keeps no durable state, so there is nothing to open here and no
- * `shutdown` counterpart. What this hook buys is attribution at boot: without
- * it, an unresolvable CLI or a mistyped `browserMode` is first discovered by
- * someone clicking a button in the app and reading a 503.
+ * Launching here rather than on the first request is what makes the app open
+ * ready. A cold launch is seconds, and on a machine with no Chromium yet it is
+ * a several-minute download — paid once at boot, in the background, instead of
+ * by whoever types the first URL.
  *
- * Fail-open throughout. Throwing from `init` aborts the plugin's load, and a
- * CLI that cannot be found right now may well resolve later — the daemon
- * installs its symlink during startup, and an upgrade can move the binary — so
- * a warning is the right outcome, not a dead plugin.
+ * Deliberately non-blocking. `init` runs inside the daemon's plugin load, a
+ * thrown error aborts the plugin, and a slow one holds up boot — so the launch
+ * is kicked off and its outcome logged, while `ensurePage` stays lazy and
+ * single-flight. A request arriving mid-launch joins the launch already
+ * running; one arriving after a failed launch retries it and gets the real
+ * error in its response.
  */
 
 import { type HookFunction, type InitContext } from "@vellumai/plugin-api";
 
-import { hasResolvableBin, resetBinCache } from "../src/assistant-cli.js";
-import { isBrowserMode, loadConfig, resetConfigCache } from "../src/config.js";
-
-/** Read `browserMode` off the raw config the host parsed, if it set one. */
-function rawBrowserMode(config: unknown): unknown {
-  if (typeof config !== "object" || config === null) {
-    return undefined;
-  }
-  return (config as { browserMode?: unknown }).browserMode;
-}
+import { browserVersion, describeBrowser, ensureContext } from "../src/browser.js";
 
 const init: HookFunction<InitContext> = async (ctx) => {
-  // `init` runs on every boot and on in-place redeploys, so drop both memos
-  // rather than carrying a previous load's answers into this one.
-  resetConfigCache();
-  resetBinCache();
-
-  const config = await loadConfig();
-
-  const configuredMode = rawBrowserMode(ctx.config);
-  if (configuredMode !== undefined && !isBrowserMode(configuredMode)) {
-    ctx.logger.warn(
-      { configured: configuredMode, using: config.browserMode },
-      'Ignoring unrecognized "browserMode" in config.json',
+  const { source } = describeBrowser();
+  if (source === "none") {
+    ctx.logger.info(
+      { source },
+      "No Chromium found — downloading Chrome for Testing in the background. The browser app will be usable once it finishes.",
     );
   }
 
-  if (!hasResolvableBin(config)) {
-    ctx.logger.warn(
-      { assistantBin: config.assistantBin },
-      'Could not locate the `assistant` CLI. The browser app cannot drive a page until it resolves on PATH, or until "assistantBin" in config.json points at it.',
-    );
-    return;
-  }
-
-  ctx.logger.info(
-    { session: config.sessionId, browserMode: config.browserMode },
-    "Browser app ready",
+  void ensureContext().then(
+    () => {
+      ctx.logger.info(
+        { source: describeBrowser().source, version: browserVersion() },
+        "Browser ready",
+      );
+    },
+    (err: unknown) => {
+      ctx.logger.warn(
+        { err },
+        "Could not start the browser. The app will retry on its next request.",
+      );
+    },
   );
 };
 

@@ -266,11 +266,68 @@ body {
   min-height: 0;
 }
 
+/*
+ * The capture and its hit targets share one positioning context, so a box
+ * expressed as a percentage of the stage lands exactly on top of the element it
+ * describes at any rendered width — no measuring, no resize observer.
+ */
+.stage {
+  position: relative;
+  display: block;
+  line-height: 0;
+}
+
+.stage.clickable {
+  cursor: crosshair;
+}
+
 .capture {
   display: block;
   width: 100%;
   height: auto;
   max-width: 100%;
+}
+
+/*
+ * A transparent target over each interactive element. Invisible until pointed
+ * at (or until its row in the rail is), so the page reads as the page rather
+ * than as a debug overlay.
+ */
+.hit {
+  position: absolute;
+  margin: 0;
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--v-radius-xs, 2px);
+  background: transparent;
+  cursor: pointer;
+  transition:
+    background var(--v-duration-fast, 0.15s),
+    border-color var(--v-duration-fast, 0.15s);
+}
+
+.hit:disabled {
+  cursor: default;
+}
+
+.hit.active,
+.hit:focus-visible {
+  border-color: var(--v-accent, #3b82f6);
+  background: color-mix(in srgb, var(--v-accent, #3b82f6) 18%, transparent);
+}
+
+@media (hover: hover) {
+  .hit:not(:disabled):hover {
+    border-color: var(--v-accent, #3b82f6);
+    background: color-mix(in srgb, var(--v-accent, #3b82f6) 18%, transparent);
+  }
+}
+
+/* Pointing is a hover affordance; without one, every target stays visible. */
+@media (hover: none) {
+  .hit {
+    border-color: color-mix(in srgb, var(--v-accent, #3b82f6) 35%, transparent);
+  }
 }
 
 .viewport-fallback {
@@ -378,6 +435,11 @@ body {
 
 .element.open {
   background: var(--v-surface, #f5f5f7);
+}
+
+/* Mirrors the highlight on the capture, so the two views read as one page. */
+.element.active {
+  box-shadow: inset 2px 0 0 var(--v-accent, #3b82f6);
 }
 
 .element-head {

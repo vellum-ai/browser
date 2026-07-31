@@ -11,62 +11,50 @@ const BASE = "/x/plugins/browser";
 
 // ── Wire types ───────────────────────────────────────────────────────
 
+/** A rectangle in CSS pixels. */
+export interface Rect {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
 /** One interactive element on the page, addressable by `eid`. */
 export interface PageElement {
   eid: string;
   role: string;
+  name: string;
   attrs: Record<string, string>;
   value?: string;
-  name: string;
+  /** Position in the viewport — where to draw a box on a viewport capture. */
+  rect: Rect;
+  /** Position in the document — the same, for a full-page capture. */
+  pageRect: Rect;
 }
 
-export interface Screenshot {
-  mediaType: string;
-  data: string;
-}
-
-/** What every page-changing route returns. */
+/** What every page-touching route returns. */
 export interface PageView {
   url: string;
   title: string;
   elements: PageElement[];
-  screenshot: Screenshot | null;
+  /** Base64 JPEG, or null when the capture failed. */
+  screenshot: string | null;
   screenshotError: string | null;
+  fullPage: boolean;
+  /** Size of the capture in CSS pixels, for mapping element boxes onto it. */
+  capture: { width: number; height: number };
+  scroll: { x: number; y: number };
   message: string | null;
 }
 
-export interface BackendStatus {
-  mode: string;
-  available: boolean;
-  autoCandidate: boolean;
-  summary: string;
-  userActions: string[];
-}
-
-export interface BrowserStatus {
-  requestedMode: string | null;
-  recommendedMode: string | null;
-  modes: BackendStatus[];
-}
-
 export interface StatusBody {
-  session: string;
-  mode: string;
-  homeUrl: string;
-  searchEnabled: boolean;
-  backend: BrowserStatus | null;
-  backendError: string | null;
+  running: boolean;
+  source: "system-chrome" | "chrome-for-testing" | "none";
 }
 
 export interface ExtractBody {
   text: string;
-  url: string | null;
-}
-
-export interface CloseBody {
-  closed: boolean;
-  detached: boolean;
-  problems: string[];
+  url: string;
 }
 
 /** Every action the `act` route accepts, with its arguments. */
@@ -87,17 +75,19 @@ export type Action =
       value?: string;
       label?: string;
       index?: number;
-    };
+    }
+  | { action: "click-at"; x: number; y: number }
+  | { action: "back" | "forward" | "reload" };
 
 // ── Transport ────────────────────────────────────────────────────────
 
 /**
  * A route that answered with a failure.
  *
- * Routes return `{ error, hint? }`, and the hint is the actionable half — an
- * unresolvable CLI or a disabled search template both come back with the exact
- * `config.json` edit that fixes them — so it survives as its own field rather
- * than being flattened into the message.
+ * Routes return `{ error, hint? }`, and the hint is the actionable half — a
+ * stale element id comes back with "reload the page", a missing Chromium with
+ * the command that installs it — so it survives as its own field rather than
+ * being flattened into the message.
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -111,19 +101,14 @@ export class ApiError extends Error {
   }
 }
 
-function toApiError(status: string | number, payload: unknown, fallback: string): ApiError {
-  const numeric = typeof status === "number" ? status : 0;
+function toApiError(status: number, payload: unknown, fallback: string): ApiError {
   if (typeof payload === "object" && payload !== null) {
     const body = payload as { error?: unknown; hint?: unknown };
     if (typeof body.error === "string" && body.error !== "") {
-      return new ApiError(
-        body.error,
-        numeric,
-        typeof body.hint === "string" ? body.hint : null,
-      );
+      return new ApiError(body.error, status, typeof body.hint === "string" ? body.hint : null);
     }
   }
-  return new ApiError(fallback, numeric, null);
+  return new ApiError(fallback, status, null);
 }
 
 async function request<T>(path: string, init?: VellumFetchInit): Promise<T> {
@@ -166,14 +151,14 @@ function post<T>(path: string, body: unknown): Promise<T> {
 
 // ── Operations ───────────────────────────────────────────────────────
 
-/** Read settings and backend readiness. The app's first call. */
+/** Whether the browser is up, and which Chromium backs it. The first call. */
 export function fetchStatus(): Promise<StatusBody> {
   return request<StatusBody>("/status");
 }
 
 /** Load a page from raw address-bar input (a URL, a host, or a search phrase). */
-export function navigate(input: string): Promise<PageView> {
-  return post<PageView>("/navigate", { input });
+export function navigate(input: string, fullPage: boolean): Promise<PageView> {
+  return post<PageView>("/navigate", { input, fullPage });
 }
 
 /** Re-read the current page without changing it. */
@@ -182,8 +167,8 @@ export function fetchView(fullPage: boolean): Promise<PageView> {
 }
 
 /** Interact with the page, and get back what it looks like afterwards. */
-export function act(action: Action): Promise<PageView> {
-  return post<PageView>("/act", action);
+export function act(action: Action, fullPage: boolean): Promise<PageView> {
+  return post<PageView>("/act", { ...action, fullPage });
 }
 
 /** Read the page as text. */
@@ -191,9 +176,9 @@ export function fetchText(includeLinks: boolean): Promise<ExtractBody> {
   return request<ExtractBody>(`/extract${includeLinks ? "?includeLinks=1" : ""}`);
 }
 
-/** Close the page and release the browser. */
-export function closeSession(): Promise<CloseBody> {
-  return post<CloseBody>("/close", {});
+/** Shut the browser down. The profile survives, so logins do too. */
+export function closeBrowser(): Promise<{ closed: true }> {
+  return post<{ closed: true }>("/close", {});
 }
 
 /**

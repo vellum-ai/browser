@@ -4,7 +4,7 @@ import {
   ApiError,
   act,
   canRelayPrompt,
-  closeSession,
+  closeBrowser,
   fetchStatus,
   fetchText,
   fetchView,
@@ -13,9 +13,9 @@ import {
 } from "../api";
 import type { Action, ExtractBody, PageView, StatusBody } from "../api";
 import { AddressBar } from "./AddressBar";
-import { BackendBanner } from "./BackendBanner";
 import { ElementList } from "./ElementList";
 import { ErrorBanner } from "./ErrorBanner";
+import { StartupBanner } from "./StartupBanner";
 import { TextPanel } from "./TextPanel";
 import { Viewport } from "./Viewport";
 
@@ -23,23 +23,6 @@ import { Viewport } from "./Viewport";
 const LIVE_INTERVAL_MS = 3000;
 
 type Tab = "elements" | "text";
-
-/**
- * Where a navigation lands in the app's own history.
- *
- * The browser backend exposes no history operations, so back and forward are
- * the app's: it keeps the stack of pages it loaded and re-navigates to move
- * through it. That is why a navigation has to say whether it is making history
- * ("push") or replaying it ("none").
- */
-type HistoryMode = "push" | "none";
-
-interface History {
-  entries: string[];
-  index: number;
-}
-
-const EMPTY_HISTORY: History = { entries: [], index: -1 };
 
 /** Normalize anything thrown by the client into the type the banner renders. */
 function asApiError(err: unknown): ApiError {
@@ -60,7 +43,7 @@ export function App() {
   const [includeLinks, setIncludeLinks] = useState(false);
   const [fullPage, setFullPage] = useState(false);
   const [live, setLive] = useState(false);
-  const [history, setHistory] = useState<History>(EMPTY_HISTORY);
+  const [activeEid, setActiveEid] = useState<string | null>(null);
 
   // The live-refresh interval and the async operations both need to know
   // whether something is already in flight, and neither can read it out of the
@@ -76,10 +59,7 @@ export function App() {
    * click with a reload and then report whichever finished last.
    */
   const run = useCallback(
-    async (
-      operation: () => Promise<PageView>,
-      historyMode: HistoryMode = "push",
-    ): Promise<void> => {
+    async (operation: () => Promise<PageView>): Promise<void> => {
       if (inFlight.current) {
         return;
       }
@@ -91,16 +71,6 @@ export function App() {
         setView(next);
         if (next.url !== "") {
           setAddress(next.url);
-          if (historyMode === "push") {
-            setHistory((prev) => {
-              const trimmed = prev.entries.slice(0, prev.index + 1);
-              if (trimmed[trimmed.length - 1] === next.url) {
-                return { entries: trimmed, index: trimmed.length - 1 };
-              }
-              const entries = [...trimmed, next.url];
-              return { entries, index: entries.length - 1 };
-            });
-          }
         }
       } catch (err) {
         setError(asApiError(err));
@@ -113,55 +83,32 @@ export function App() {
   );
 
   const go = useCallback(
-    (input: string, historyMode: HistoryMode = "push") => {
-      void run(() => navigate(input), historyMode);
+    (input: string) => {
+      void run(() => navigate(input, fullPage));
     },
-    [run],
+    [fullPage, run],
   );
 
-  const reload = useCallback(() => {
-    void run(() => fetchView(fullPage), "none");
-  }, [fullPage, run]);
-
+  // Back, forward, and reload are the page's own history, not a stack this app
+  // keeps. Driving Playwright in-process means `goBack` moves through the real
+  // session history — including entries a site pushed itself — which a
+  // re-navigation to a remembered URL never could.
   const perform = useCallback(
     (action: Action) => {
-      void run(() => act(action));
+      void run(() => act(action, fullPage));
     },
-    [run],
+    [fullPage, run],
   );
 
-  const back = useCallback(() => {
-    const target = history.entries[history.index - 1];
-    if (target === undefined) {
-      return;
-    }
-    setHistory({ entries: history.entries, index: history.index - 1 });
-    go(target, "none");
-  }, [go, history]);
-
-  const forward = useCallback(() => {
-    const target = history.entries[history.index + 1];
-    if (target === undefined) {
-      return;
-    }
-    setHistory({ entries: history.entries, index: history.index + 1 });
-    go(target, "none");
-  }, [go, history]);
-
-  // Bootstrap: read settings and backend readiness, then open the home page if
-  // one is configured.
+  // Bootstrap: find out whether the browser is up. It is launched by the
+  // plugin's init hook, so there is nothing to start from here.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const bootstrap = await fetchStatus();
-        if (cancelled) {
-          return;
-        }
-        setStatus(bootstrap);
-        if (bootstrap.homeUrl !== "") {
-          setAddress(bootstrap.homeUrl);
-          go(bootstrap.homeUrl);
+        if (!cancelled) {
+          setStatus(bootstrap);
         }
       } catch (err) {
         if (!cancelled) {
@@ -172,7 +119,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, [go]);
+  }, []);
 
   // Live refresh. Skipped whenever an operation is in flight, so a slow page
   // never queues a backlog of captures behind itself.
@@ -182,7 +129,7 @@ export function App() {
     }
     const timer = setInterval(() => {
       if (!inFlight.current) {
-        void run(() => fetchView(fullPage), "none");
+        void run(() => fetchView(fullPage));
       }
     }, LIVE_INTERVAL_MS);
     return () => clearInterval(timer);
@@ -230,15 +177,13 @@ export function App() {
   const end = useCallback(async () => {
     setBusy(true);
     try {
-      const result = await closeSession();
+      await closeBrowser();
       setView(null);
       setText(null);
       textFetchedFor.current = null;
-      setHistory(EMPTY_HISTORY);
       setLive(false);
-      setError(
-        result.problems.length === 0 ? null : new ApiError(result.problems.join(" "), 0, null),
-      );
+      setError(null);
+      setStatus((previous) => (previous === null ? null : { ...previous, running: false }));
     } catch (err) {
       setError(asApiError(err));
     } finally {
@@ -261,29 +206,24 @@ export function App() {
       <AddressBar
         value={address}
         busy={busy}
-        canGoBack={history.index > 0}
-        canGoForward={history.index >= 0 && history.index < history.entries.length - 1}
-        canReload={view !== null}
-        searchEnabled={status?.searchEnabled ?? false}
+        canNavigate={view !== null}
         onChange={setAddress}
-        onSubmit={(input) => go(input)}
-        onBack={back}
-        onForward={forward}
-        onReload={reload}
+        onSubmit={go}
+        onBack={() => perform({ action: "back" })}
+        onForward={() => perform({ action: "forward" })}
+        onReload={() => perform({ action: "reload" })}
       />
 
-      {status !== null && <BackendBanner status={status} collapsed={view !== null} />}
+      {status !== null && view === null && <StartupBanner status={status} />}
       {error !== null && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
       {view === null ? (
         <div class="empty">
           <h1>A browser, in the panel</h1>
           <p>
-            Type a URL above
-            {status?.searchEnabled === true ? " — or a search phrase — " : " "}
-            to open a page. It loads in the assistant&rsquo;s own browser on the{" "}
-            <code>{status?.session ?? "browser-app"}</code> session, so it stays separate from
-            whatever the assistant is browsing in a conversation.
+            Type a URL or a search above to open a page. It runs in this plugin&rsquo;s own
+            Chromium, with its own profile, so signing in somewhere here stays signed in the
+            next time you open it.
           </p>
         </div>
       ) : (
@@ -292,7 +232,9 @@ export function App() {
             <Viewport
               view={view}
               busy={busy}
-              onScroll={(direction) => perform({ action: "scroll", direction })}
+              activeEid={activeEid}
+              onAct={perform}
+              onHoverElement={setActiveEid}
             />
             <aside class="rail">
               <div class="tabs" role="tablist">
@@ -316,7 +258,13 @@ export function App() {
                 </button>
               </div>
               {tab === "elements" ? (
-                <ElementList elements={view.elements} busy={busy} onAct={perform} />
+                <ElementList
+                  elements={view.elements}
+                  busy={busy}
+                  activeEid={activeEid}
+                  onAct={perform}
+                  onHoverElement={setActiveEid}
+                />
               ) : (
                 <TextPanel
                   text={text}
@@ -346,7 +294,7 @@ export function App() {
                   // would leave the checkbox describing the wrong image.
                   const next = event.currentTarget.checked;
                   setFullPage(next);
-                  void run(() => fetchView(next), "none");
+                  void run(() => fetchView(next));
                 }}
               />
               Full page
@@ -364,8 +312,14 @@ export function App() {
                 Ask the assistant
               </button>
             )}
-            <button type="button" class="link-button" onClick={() => void end()} disabled={busy}>
-              Close page
+            <button
+              type="button"
+              class="link-button"
+              onClick={() => void end()}
+              disabled={busy}
+              title="Close the browser. Cookies and logins are kept."
+            >
+              Close browser
             </button>
           </footer>
         </>

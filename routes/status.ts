@@ -1,52 +1,33 @@
 /**
  * `GET /x/plugins/browser/status` — the app's bootstrap call.
  *
- * Returns the settings the app needs to render its first frame plus which
- * browser backends can actually serve a request. The app opens on this rather
- * than on a navigation, so a missing extension or an unreachable backend is
- * reported as guidance instead of surfacing later as a failed click.
+ * Reports whether the browser is up and where its executable came from. The app
+ * opens on this rather than on a navigation, so a machine with no Chromium yet
+ * is told so up front instead of discovering it through a failed click.
+ *
+ * Read-only: it never launches. `init` owns starting the browser, and a GET
+ * that could trigger a five-minute download would be a poor bootstrap call.
  */
 
-import { runBrowserOperation } from "../src/assistant-cli.js";
-import { loadConfig } from "../src/config.js";
-import type { BrowserMode } from "../src/config.js";
+import { describeBrowser, isRunning } from "../src/browser.js";
 import { handle, ok } from "../src/http.js";
-import { parseStatus } from "../src/page.js";
-import type { BrowserStatus } from "../src/page.js";
 
 export interface StatusBody {
-  session: string;
-  mode: BrowserMode;
-  homeUrl: string;
-  searchEnabled: boolean;
-  /** Null when the status probe itself failed; `backendError` says why. */
-  backend: BrowserStatus | null;
-  backendError: string | null;
+  /** True once the browser is launched and usable. */
+  running: boolean;
+  /**
+   * Which Chromium backs it: the machine's Google Chrome, Playwright's own
+   * Chrome for Testing, or neither yet — in which case the first navigation
+   * downloads Chrome for Testing.
+   */
+  source: "system-chrome" | "chrome-for-testing" | "none";
 }
 
 export async function GET(): Promise<Response> {
   return handle(async () => {
-    const config = await loadConfig();
-
-    let backend: BrowserStatus | null = null;
-    let backendError: string | null = null;
-    try {
-      const result = await runBrowserOperation("status", {}, config);
-      backend = parseStatus(result.content);
-    } catch (err) {
-      // A failed probe must not block the app from opening — it renders the
-      // reason in its banner and still lets the user try a navigation, which
-      // is often how a backend gets provisioned in the first place.
-      backendError = err instanceof Error ? err.message : String(err);
-    }
-
     const body: StatusBody = {
-      session: config.sessionId,
-      mode: config.browserMode,
-      homeUrl: config.homeUrl,
-      searchEnabled: config.searchUrlTemplate !== "",
-      backend,
-      backendError,
+      running: isRunning(),
+      source: describeBrowser().source,
     };
     return ok(body);
   });
