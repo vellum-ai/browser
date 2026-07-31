@@ -110,14 +110,34 @@ export class ApiError extends Error {
   }
 }
 
-function toApiError(status: number, payload: unknown, fallback: string): ApiError {
+/**
+ * Turn a failed response into an error worth reading.
+ *
+ * A body with an `error` field came from this plugin's routes and already says
+ * what went wrong. A body without one did not: the assistant's route dispatcher
+ * answers 500 on its own when a route module cannot be imported or throws
+ * outside its handler, and that response carries no message. Rendering the bare
+ * status there produced "Request failed (500 )." — technically true and no help
+ * at all — so that case names where to look instead.
+ */
+function toApiError(status: number, statusText: string, payload: unknown): ApiError {
   if (typeof payload === "object" && payload !== null) {
     const body = payload as { error?: unknown; hint?: unknown };
     if (typeof body.error === "string" && body.error !== "") {
       return new ApiError(body.error, status, typeof body.hint === "string" ? body.hint : null);
     }
   }
-  return new ApiError(fallback, status, null);
+
+  if (status >= 500) {
+    return new ApiError(
+      "The browser plugin did not respond.",
+      status,
+      "The assistant's log has the plugin's own error — check it with `assistant logs`, and `assistant plugins list` for the plugin's load status.",
+    );
+  }
+
+  const detail = statusText.trim() === "" ? `${status}` : `${status} ${statusText.trim()}`;
+  return new ApiError(`Request failed (${detail}).`, status, null);
 }
 
 async function request<T>(path: string, init?: VellumFetchInit): Promise<T> {
@@ -141,11 +161,7 @@ async function request<T>(path: string, init?: VellumFetchInit): Promise<T> {
   }
 
   if (!response.ok) {
-    throw toApiError(
-      response.status,
-      payload,
-      `Request failed (${response.status} ${response.statusText}).`,
-    );
+    throw toApiError(response.status, response.statusText, payload);
   }
   return payload as T;
 }

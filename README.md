@@ -154,6 +154,25 @@ with the command that installs it.
 `act` validates its action against an allowlist rather than passing it through,
 so a request cannot reach behavior the app does not offer.
 
+## The app runs in a sandboxed frame
+
+The host renders the app in `<iframe sandbox="allow-scripts allow-popups
+allow-popups-to-escape-sandbox">`. No `allow-forms`, no `allow-same-origin`,
+and no top-level navigation — which rules out three things a UI reaches for by
+reflex:
+
+- **No `<form>` and no `type="submit"`.** Submission is blocked, and the
+  `submit` event never fires. There is no exception to catch: the button and the
+  Enter key simply do nothing. Submitting is a click handler plus an explicit
+  Enter key handler.
+- **No `<a href>`.** Navigation is blocked, so the link is a dead control.
+- **No bare `fetch`.** The frame's origin is opaque and carries no gateway URL
+  or auth; `window.vellum.fetch` is the only way to reach the routes.
+
+The first two fail *silently*, which is what makes them worth a rule rather
+than a code review. `src/__tests__/app-sandbox.test.ts` fails the build if any
+of them come back.
+
 ## Page content is untrusted
 
 Element names, attribute values, and body text are authored by whoever controls
