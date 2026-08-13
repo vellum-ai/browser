@@ -110,15 +110,45 @@ export function App() {
     [fullPage, run],
   );
 
-  // Bootstrap: find out whether the browser is up. It is launched by the
-  // plugin's init hook, so there is nothing to start from here.
+  /**
+   * Open the Chromium window, or try again after a failed launch.
+   *
+   * Used on app load and by the Start / Retry button. `init` only installs
+   * Chromium; this is what creates the window.
+   */
+  const begin = useCallback(async () => {
+    setStarting(true);
+    setError(null);
+    try {
+      setStatus(await startBrowser());
+    } catch (err) {
+      setError(asApiError(err));
+      // The request can time out while Chromium is still installing. Re-read
+      // status so a launch that finished behind the timeout still shows up.
+      void fetchStatus()
+        .then(setStatus)
+        .catch(() => {
+          // Status is a nicety here; the start error already shows.
+        });
+    } finally {
+      setStarting(false);
+    }
+  }, []);
+
+  // Bootstrap: read status, then open the window if it is not already up.
+  // The Start button stays as a retry if this fails or the user later closes
+  // the browser.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       try {
         const bootstrap = await fetchStatus();
-        if (!cancelled) {
-          setStatus(bootstrap);
+        if (cancelled) {
+          return;
+        }
+        setStatus(bootstrap);
+        if (!bootstrap.running) {
+          await begin();
         }
       } catch (err) {
         if (!cancelled) {
@@ -129,7 +159,7 @@ export function App() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [begin]);
 
   // Live refresh. Skipped whenever an operation is in flight, so a slow page
   // never queues a backlog of captures behind itself.
@@ -184,19 +214,6 @@ export function App() {
     setText(null);
   }, []);
 
-  /** Start the browser, or try again after a failed launch. */
-  const retry = useCallback(async () => {
-    setStarting(true);
-    setError(null);
-    try {
-      setStatus(await startBrowser());
-    } catch (err) {
-      setError(asApiError(err));
-    } finally {
-      setStarting(false);
-    }
-  }, []);
-
   const end = useCallback(async () => {
     setBusy(true);
     try {
@@ -238,7 +255,7 @@ export function App() {
       />
 
       {status !== null && view === null && (
-        <StartupBanner status={status} retrying={starting} onRetry={() => void retry()} />
+        <StartupBanner status={status} retrying={starting} onRetry={() => void begin()} />
       )}
       {error !== null && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 

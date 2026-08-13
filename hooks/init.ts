@@ -1,46 +1,43 @@
 /**
- * `init` hook: get the browser running.
+ * `init` hook: install Chromium.
  *
- * Launching here rather than on the first request is what makes the app open
- * ready. A cold launch is seconds, and on a machine with no Chromium yet it is
- * a several-minute download — paid once at boot, in the background, instead of
- * by whoever types the first URL.
+ * A plugin's dependencies install with `--ignore-scripts`, so Playwright's
+ * browser download never runs and a fresh install has no Chromium. Paying that
+ * download here (once, in the background) means the app can open a window on
+ * load instead of asking the user to click Start first.
  *
- * Deliberately non-blocking. `init` runs inside the daemon's plugin load, a
- * thrown error aborts the plugin, and a slow one holds up boot — so the launch
- * is kicked off and its outcome logged, while `ensurePage` stays lazy and
- * single-flight. A request arriving mid-launch joins the launch already
- * running; one arriving after a failed launch retries it and gets the real
- * error in its response.
+ * This file must not statically import `src/browser.ts`. That module loads
+ * Playwright, and the assistant's hook import has a short timeout. A static
+ * import here is how init silently never runs on a fresh install. The browser
+ * module is loaded dynamically after this hook has already been accepted.
+ *
+ * Deliberately non-blocking. `init` runs inside the assistant's plugin load, a
+ * thrown error aborts the plugin, and a slow one holds up boot, so the install
+ * is kicked off and its outcome logged. The window is not opened here: that
+ * happens when the app loads (and the Start button remains as a retry).
  */
 
 import { type HookFunction, type InitContext } from "@vellumai/plugin-api";
 
-import { browserVersion, describeBrowser, ensureContext } from "../src/browser.js";
-
 const init: HookFunction<InitContext> = async (ctx) => {
-  const { source } = describeBrowser();
-  if (source === "none") {
-    ctx.logger.info(
-      { source },
-      "No Chromium found — downloading Chrome for Testing in the background. The browser app will be usable once it finishes.",
-    );
-  }
-
-  void ensureContext().then(
-    () => {
-      ctx.logger.info(
-        { source: describeBrowser().source, version: browserVersion() },
-        "Browser ready",
-      );
-    },
-    (err: unknown) => {
+  void import("../src/browser.js")
+    .then(async ({ describeBrowser, ensureInstalled }) => {
+      const { source } = describeBrowser();
+      if (source === "none") {
+        ctx.logger.info(
+          { source },
+          "No Chromium found. Downloading Chrome for Testing in the background.",
+        );
+      }
+      await ensureInstalled();
+      ctx.logger.info({ source: describeBrowser().source }, "Chromium is installed");
+    })
+    .catch((err: unknown) => {
       ctx.logger.warn(
         { err },
-        "Could not start the browser. The app will retry on its next request.",
+        "Could not install Chromium. The app will retry when it opens.",
       );
-    },
-  );
+    });
 };
 
 export default init;
