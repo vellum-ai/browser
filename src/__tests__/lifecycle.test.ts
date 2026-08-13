@@ -80,6 +80,9 @@ describe("the app is a live view, not a screenshot picker", () => {
     expect(viewport).not.toContain("frameRef");
     expect(source("apps/browser/src/api.ts")).toContain("inputChain");
     expect(source("routes/input.ts")).toContain("exclusive");
+    expect(source("routes/input.ts")).not.toMatch(
+      /import\s*\{[^}]*requireNumber[^}]*\}\s*from\s*["'].*http/,
+    );
     expect(source("routes/frame.ts")).toContain("currentViewport()");
   });
 });

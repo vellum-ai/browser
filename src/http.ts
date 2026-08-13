@@ -91,18 +91,6 @@ export function optionalNumber(
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
-/** Read a required finite number field, or fail with a 400. */
-export function requireNumber(
-  body: Record<string, unknown>,
-  field: string,
-): number {
-  const value = optionalNumber(body, field);
-  if (value === undefined) {
-    throw new BrowserError(`\`${field}\` is required.`, { status: 400 });
-  }
-  return value;
-}
-
 /** Read a boolean query parameter (`?includeLinks=1`). */
 export function boolParam(request: Request, name: string): boolean {
   const value = new URL(request.url).searchParams.get(name);

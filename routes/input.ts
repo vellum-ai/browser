@@ -13,7 +13,6 @@ import {
   optionalNumber,
   optionalString,
   readJson,
-  requireNumber,
   requireString,
 } from "../src/http.js";
 import { exclusive } from "../src/lock.js";
@@ -87,6 +86,21 @@ export async function POST(request: Request): Promise<Response> {
       return ok({ ok: true as const, ...currentViewport() });
     });
   });
+}
+
+/**
+ * Required number, local to this file.
+ *
+ * Do not import a newly added export from `http.ts`. After a plugin upgrade
+ * Bun may reload this route against a cached `http.ts` that does not have
+ * the new name, which 500s every click while `/frame` keeps working.
+ */
+function requireNumber(body: Record<string, unknown>, field: string): number {
+  const value = optionalNumber(body, field);
+  if (value === undefined) {
+    throw new BrowserError(`\`${field}\` is required.`, { status: 400 });
+  }
+  return value;
 }
 
 function pointOf(body: Record<string, unknown>): { x: number; y: number } {
