@@ -16,7 +16,8 @@ import {
   requireNumber,
   requireString,
 } from "../src/http.js";
-import { resizeViewport } from "../src/screencast.js";
+import { exclusive } from "../src/lock.js";
+import { currentViewport, resizeViewport } from "../src/screencast.js";
 
 const BUTTONS = new Set(["left", "right", "middle"]);
 
@@ -26,56 +27,78 @@ export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
     const body = await readJson(request);
     const type = requireString(body, "type");
-    const page = await ensurePage();
 
-    switch (type) {
-      case "wheel": {
-        const x = requireNumber(body, "x");
-        const y = requireNumber(body, "y");
-        await page.mouse.move(x, y);
-        await page.mouse.wheel(requireNumber(body, "deltaX"), requireNumber(body, "deltaY"));
-        break;
-      }
-      case "move": {
-        await page.mouse.move(requireNumber(body, "x"), requireNumber(body, "y"));
-        break;
-      }
-      case "down": {
-        await page.mouse.move(requireNumber(body, "x"), requireNumber(body, "y"));
-        await page.mouse.down({ button: buttonOf(body) });
-        break;
-      }
-      case "up": {
-        await page.mouse.move(requireNumber(body, "x"), requireNumber(body, "y"));
-        await page.mouse.up({ button: buttonOf(body) });
-        break;
-      }
-      case "click": {
-        const count = optionalNumber(body, "count");
-        await page.mouse.click(requireNumber(body, "x"), requireNumber(body, "y"), {
-          button: buttonOf(body),
-          ...(count === undefined ? {} : { clickCount: count }),
-        });
-        break;
-      }
-      case "key": {
-        await page.keyboard.press(requireString(body, "key"));
-        break;
-      }
-      case "resize": {
-        await resizeViewport(page, requireNumber(body, "width"), requireNumber(body, "height"));
-        break;
-      }
-      default: {
-        throw new BrowserError(
-          `Unsupported input \`${type}\`. Expected wheel, move, down, up, click, key, or resize.`,
-          { status: 400 },
-        );
-      }
-    }
+    return exclusive(async () => {
+      const page = await ensurePage();
 
-    return ok({ ok: true as const });
+      switch (type) {
+        case "wheel": {
+          const at = pointOf(body);
+          await page.mouse.move(at.x, at.y);
+          await page.mouse.wheel(requireNumber(body, "deltaX"), requireNumber(body, "deltaY"));
+          break;
+        }
+        case "move": {
+          const at = pointOf(body);
+          await page.mouse.move(at.x, at.y);
+          break;
+        }
+        case "down": {
+          const at = pointOf(body);
+          await page.mouse.move(at.x, at.y);
+          await page.mouse.down({ button: buttonOf(body) });
+          break;
+        }
+        case "up": {
+          const at = pointOf(body);
+          await page.mouse.move(at.x, at.y);
+          await page.mouse.up({ button: buttonOf(body) });
+          break;
+        }
+        case "click": {
+          const at = pointOf(body);
+          const count = optionalNumber(body, "count");
+          await page.mouse.click(at.x, at.y, {
+            button: buttonOf(body),
+            ...(count === undefined ? {} : { clickCount: count }),
+          });
+          break;
+        }
+        case "key": {
+          await page.keyboard.press(requireString(body, "key"));
+          break;
+        }
+        case "resize": {
+          const applied = await resizeViewport(
+            page,
+            requireNumber(body, "width"),
+            requireNumber(body, "height"),
+          );
+          return ok({ ok: true as const, ...applied });
+        }
+        default: {
+          throw new BrowserError(
+            `Unsupported input \`${type}\`. Expected wheel, move, down, up, click, key, or resize.`,
+            { status: 400 },
+          );
+        }
+      }
+
+      return ok({ ok: true as const, ...currentViewport() });
+    });
   });
+}
+
+function pointOf(body: Record<string, unknown>): { x: number; y: number } {
+  const { width, height } = currentViewport();
+  return {
+    x: clamp(requireNumber(body, "x"), 0, Math.max(0, width - 1)),
+    y: clamp(requireNumber(body, "y"), 0, Math.max(0, height - 1)),
+  };
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function buttonOf(body: Record<string, unknown>): MouseButton {

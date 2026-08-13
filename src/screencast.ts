@@ -119,13 +119,17 @@ export async function stopScreencast(options: { keepFrame?: boolean } = {}): Pro
  * without letterboxing or showing a slice of a larger capture. A no-op when
  * the size has not moved far enough to be worth a restart.
  */
-export async function resizeViewport(page: Page, width: number, height: number): Promise<void> {
+export async function resizeViewport(
+  page: Page,
+  width: number,
+  height: number,
+): Promise<{ width: number; height: number }> {
   const next = {
     width: clamp(Math.round(width), 320, 2400),
     height: clamp(Math.round(height), 200, 1600),
   };
   if (Math.abs(next.width - viewport.width) < 8 && Math.abs(next.height - viewport.height) < 8) {
-    return;
+    return { ...viewport };
   }
   viewport = next;
   await page.setViewportSize(next);
@@ -133,6 +137,7 @@ export async function resizeViewport(page: Page, width: number, height: number):
     await stopScreencast({ keepFrame: true });
     await startScreencast(page);
   }
+  return { ...viewport };
 }
 
 function clamp(value: number, min: number, max: number): number {
