@@ -8,8 +8,8 @@ interface Props {
 /**
  * The last failure, with its remediation hint kept separate from its message.
  *
- * Browser failures are usually actionable — a stale element id, an unresolvable
- * CLI, a timeout on a slow page — and the routes return the fix alongside the
+ * Browser failures are usually actionable: a missing Chromium, an unresolvable
+ * address, a timeout on a slow page. The routes return the fix alongside the
  * reason, so both are shown rather than collapsed into one sentence.
  */
 export function ErrorBanner({ error, onDismiss }: Props) {

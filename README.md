@@ -3,9 +3,10 @@
 Support an App in your assistant that acts as a browser.
 
 A Vellum plugin that puts a browser in the workspace panel. Address bar,
-back/forward/reload, the live page — clickable — its interactive elements, and
-its text. It drives Playwright in-process, with its own Chromium and its own
-profile, so signing in somewhere stays signed in the next time you open it.
+back/forward/reload, and the live page: you scroll, click, and type on it the
+way you would a real window. It drives Playwright in-process, with its own
+Chromium and its own profile, so signing in somewhere stays signed in the next
+time you open it.
 
 ## What it ships
 
@@ -14,11 +15,11 @@ One surface does the work and two support it:
 | Surface         | Path             | What it is                                                                                |
 | --------------- | ---------------- | ----------------------------------------------------------------------------------------- |
 | App             | `apps/browser/`  | The browser UI, rendered in the workspace panel. This is the plugin.                      |
-| HTTP routes     | `routes/`        | The app's backend, served under `/x/plugins/browser/`. One call per interaction.          |
+| HTTP routes     | `routes/`        | The app's backend, served under `/x/plugins/browser/`.                                    |
 | Lifecycle hooks | `hooks/`         | `init` installs Chromium at boot; `shutdown` closes a running window.                     |
 
-Everything under `src/` is internal: the browser lifecycle, the in-page element
-collector, address-bar resolution, and shared HTTP helpers.
+Everything under `src/` is internal: the browser lifecycle, the live frame
+stream, address-bar resolution, and shared HTTP helpers.
 
 ## Install
 
@@ -47,29 +48,16 @@ Holding the page rather than addressing it a command at a time is what buys the
 two things that make this feel like a browser:
 
 **History is the page's own.** Back and forward are `page.goBack()` and
-`page.goForward()`, so they move through the real session history — including
+`page.goForward()`, so they move through the real session history, including
 entries a single-page app pushed itself, which no remembered list of URLs could
 reproduce.
 
-**The capture is clickable.** Every element the collector finds comes back with
-its geometry, so the app lays a transparent hit target over each one. Clicking
-there dispatches by element id, not by guessing at a coordinate. Clicking
-anywhere else is a real click at that point, for the things no collector can
-enumerate — a canvas, a map, a custom-drawn control.
-
-### Element ids
-
-The collector runs in the page, stamps each element it finds with a
-`data-vellum-eid` attribute, and returns the id alongside the description. The
-attribute is what makes the id durable: an index into a list goes stale the
-moment the DOM shifts, but an attribute on the node survives re-layout, and a
-click on it either hits the element it named or fails loudly because the node is
-gone. That is the only way this plugin reaches an element, so there is no path
-where an id quietly resolves to a different node than the one you were looking
-at.
-
-Ids are valid for the collection that produced them, which is why every response
-carries a fresh one.
+**The page is live.** Most sites refuse to be iframed (`X-Frame-Options`), and
+the app cannot embed Chromium, so the panel shows a CDP screencast (a stream of
+JPEG frames) and forwards wheel, pointer, and keyboard events to the real page.
+Scrolling happens in Chromium. The next frame shows the result. The Playwright
+viewport is resized to the panel, so the picture fills it instead of showing a
+cropped still with empty space around it.
 
 ### Getting a Chromium
 
@@ -105,27 +93,18 @@ does not need an assistant restart to recover.
 
 ## The app
 
-- **Address bar** — a URL, a bare host (`example.com:8080/health` works), or a
+- **Address bar**: a URL, a bare host (`example.com:8080/health` works), or a
   search phrase, which goes to DuckDuckGo. Only `http` and `https` are opened;
   `javascript:`, `data:`, and `file:` are refused.
 - **Browser state**: the window opens when the app loads. Before a page is
   open, a line says whether the browser is ready, starting, or down. Down shows
   the reason and a Start / Retry button.
-- **The page** — click an element, or click anywhere. Hovering an element
-  highlights it in the list beside it, and vice versa.
-- **Back / forward / reload** — the page's real history.
-- **Elements tab** — every interactive element with its role, name, and
-  attributes, filterable. Expand a row for Click / Hover / Enter; text fields get
-  Type and Type + Enter, and comboboxes select by option label.
-- **Text tab** — the page as readable text, optionally with its links.
-- **Full page** — capture the whole scrollable page instead of the viewport.
-  Element boxes follow; clicking the background is off, since a viewport
-  coordinate would mean the wrong thing on a taller image.
-- **Live** — re-read the page every few seconds. Skipped while an operation is in
-  flight, so a slow page never queues a backlog behind itself.
-- **Ask the assistant** — hand the open page to the assistant as a prompt.
+- **The page**: a live view of Chromium. Scroll, click, and type on it. The
+  panel does not scroll a screenshot; wheel and pointer events go to the page.
+- **Back / forward / reload**: the page's real history.
+- **Ask the assistant**: hand the open page to the assistant as a prompt.
   Hidden when the host does not support relaying.
-- **Close browser** — shuts Chromium down to free the memory. The profile stays,
+- **Close browser**: shuts Chromium down to free the memory. The profile stays,
   so the next page opens still signed in.
 
 ## Configuration
@@ -144,18 +123,18 @@ URL and no auth and fails.
 | ----------- | ------ | -------------------------------------------------------------------------------- |
 | `/status`   | GET    | Whether the browser is up, which Chromium backs it, and why a launch failed. Never launches. |
 | `/start`    | POST   | Open the window, or retry after a failed launch. Called on app load. Answers like `/status`. |
-| `/navigate` | POST   | `{ input }` — raw address-bar value. Returns the page that loaded.               |
-| `/view`     | GET    | Re-read the current page. `?fullPage=1` for the whole scrollable page.           |
-| `/act`      | POST   | `{ action, … }` — click, click-at, hover, type, press-key, scroll, select-option, back, forward, reload. |
-| `/extract`  | GET    | Page text. `?includeLinks=1` appends its links.                                  |
+| `/navigate` | POST   | `{ input }`: raw address-bar value. Returns the page identity (URL, title).      |
+| `/frame`    | GET    | Latest live picture of the page. Polled by the app; does not collect elements.   |
+| `/input`    | POST   | `{ type, … }`: wheel, move, down, up, click, key, or resize. Answers immediately. |
+| `/act`      | POST   | `{ action }`: back, forward, or reload.                                          |
+| `/extract`  | GET    | Page text, for the assistant. `?includeLinks=1` appends its links.                |
 | `/close`    | POST   | Shut the browser down. The profile is kept.                                      |
 
 Every failure answers with `{ error, hint? }`, and the hint is the actionable
-half — a stale element id comes back with "reload the page", a missing Chromium
-with the command that installs it.
+half: a missing Chromium comes back with the command that installs it.
 
-`act` validates its action against an allowlist rather than passing it through,
-so a request cannot reach behavior the app does not offer.
+`input` and `act` validate their type/action against an allowlist rather than
+passing it through, so a request cannot reach behavior the app does not offer.
 
 ## The app runs in a sandboxed frame
 
@@ -178,11 +157,9 @@ of them come back.
 
 ## Page content is untrusted
 
-Element names, attribute values, and body text are authored by whoever controls
-the page. The plugin renders them as text and uses them to build arguments;
-nothing in the routes or the app treats them as instructions. Element ids are
-validated against `e<digits>` before they reach a selector, so a name carrying
-selector syntax cannot widen what a click matches.
+The page title, URL, and extracted body text are authored by whoever controls
+the page. The plugin renders them as text; nothing in the routes or the app
+treats them as instructions.
 
 ## Development
 

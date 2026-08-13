@@ -6,9 +6,9 @@
  * and there is no manual dark-mode block. Fallback values keep the app legible
  * if it is ever rendered without the injected sheet.
  *
- * Layout is a three-row grid — chrome, page, status — that fills the panel and
- * never scrolls the document itself: the capture and the rail each scroll in
- * their own box, so the address bar and status line stay put.
+ * Layout is a five-row grid (chrome, banners, page, status) that fills the
+ * panel and never scrolls the document itself. The page is a live picture of
+ * Chromium; scrolling happens there, not in this document.
  */
 
 * {
@@ -240,246 +240,40 @@ body {
   max-width: 46ch;
 }
 
-/* ── Page: capture + rail ────────────────────────────────────────── */
-
-.page {
-  grid-row: 4;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
-  min-height: 0;
-  min-width: 0;
-}
-
-@media (min-width: 900px) {
-  .page {
-    grid-template-columns: minmax(0, 1fr) minmax(280px, 34%);
-    grid-template-rows: minmax(0, 1fr);
-  }
-}
+/* ── Live page ───────────────────────────────────────────────────── */
 
 .viewport {
+  grid-row: 4;
   position: relative;
-  overflow: auto;
+  overflow: hidden;
   min-width: 0;
-  background: var(--v-surface, #f5f5f7);
   min-height: 0;
+  background: var(--v-bg, #ffffff);
+  outline: none;
+  touch-action: none;
+  overscroll-behavior: none;
 }
 
-/*
- * The capture and its hit targets share one positioning context, so a box
- * expressed as a percentage of the stage lands exactly on top of the element it
- * describes at any rendered width — no measuring, no resize observer.
- */
-.stage {
-  position: relative;
-  display: block;
-  line-height: 0;
-}
-
-.stage.clickable {
-  cursor: crosshair;
+.viewport:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--v-accent, #3b82f6);
 }
 
 .capture {
   display: block;
   width: 100%;
-  height: auto;
-  max-width: 100%;
-}
-
-/*
- * A transparent target over each interactive element. Invisible until pointed
- * at (or until its row in the rail is), so the page reads as the page rather
- * than as a debug overlay.
- */
-.hit {
-  position: absolute;
-  margin: 0;
-  padding: 0;
-  border: 1px solid transparent;
-  border-radius: var(--v-radius-xs, 2px);
-  background: transparent;
-  cursor: pointer;
-  transition:
-    background var(--v-duration-fast, 0.15s),
-    border-color var(--v-duration-fast, 0.15s);
-}
-
-.hit:disabled {
-  cursor: default;
-}
-
-.hit.active,
-.hit:focus-visible {
-  border-color: var(--v-accent, #3b82f6);
-  background: color-mix(in srgb, var(--v-accent, #3b82f6) 18%, transparent);
-}
-
-@media (hover: hover) {
-  .hit:not(:disabled):hover {
-    border-color: var(--v-accent, #3b82f6);
-    background: color-mix(in srgb, var(--v-accent, #3b82f6) 18%, transparent);
-  }
-}
-
-/* Pointing is a hover affordance; without one, every target stays visible. */
-@media (hover: none) {
-  .hit {
-    border-color: color-mix(in srgb, var(--v-accent, #3b82f6) 35%, transparent);
-  }
+  height: 100%;
+  object-fit: fill;
+  pointer-events: none;
+  user-select: none;
 }
 
 .viewport-fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
   padding: var(--v-spacing-xl, 24px);
   color: var(--v-text-secondary, #4a4a4a);
-}
-
-.scroll-controls {
-  position: sticky;
-  bottom: var(--v-spacing-sm, 8px);
-  float: right;
-  display: flex;
-  flex-direction: column;
-  gap: var(--v-spacing-xxs, 2px);
-  margin-right: var(--v-spacing-sm, 8px);
-  padding: var(--v-spacing-xxs, 2px);
-  border: 1px solid var(--v-surface-border, #d2d2d7);
-  border-radius: var(--v-radius-md, 8px);
-  background: var(--v-bg, #ffffff);
-  box-shadow: var(--v-shadow-md, 0 2px 8px rgb(0 0 0 / 12%));
-}
-
-.loading-veil {
-  position: absolute;
-  inset: 0;
-  background: var(--v-bg, #ffffff);
-  opacity: 0.35;
-  pointer-events: none;
-}
-
-/* ── Rail ────────────────────────────────────────────────────────── */
-
-.rail {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  min-width: 0;
-  border-top: 1px solid var(--v-surface-border, #d2d2d7);
-}
-
-@media (min-width: 900px) {
-  .rail {
-    border-top: none;
-    border-left: 1px solid var(--v-surface-border, #d2d2d7);
-  }
-}
-
-.tabs {
-  display: flex;
-  flex-shrink: 0;
-  border-bottom: 1px solid var(--v-surface-border, #d2d2d7);
-}
-
-.tab {
-  flex: 1;
-  min-height: 36px;
-  padding: 0 var(--v-spacing-sm, 8px);
-  border: none;
-  border-bottom: 2px solid transparent;
-  background: transparent;
-  color: var(--v-text-secondary, #4a4a4a);
-  font-size: var(--v-font-size-base, 14px);
-  cursor: pointer;
-}
-
-.tab.active {
-  color: var(--v-text, #1a1a1a);
-  border-bottom-color: var(--v-accent, #3b82f6);
-}
-
-.count {
-  color: var(--v-text-muted, #8a8a8a);
-  font-variant-numeric: tabular-nums;
-}
-
-.rail-body {
-  flex: 1;
-  min-height: 0;
-  min-width: 0;
-  overflow: auto;
-  padding: var(--v-spacing-sm, 8px);
-}
-
-.filter {
-  width: 100%;
-  font-size: 16px;
-  min-height: 32px;
-  padding: var(--v-spacing-xs, 4px) var(--v-spacing-sm, 8px);
-  margin-bottom: var(--v-spacing-sm, 8px);
-  border: 1px solid var(--v-surface-border, #d2d2d7);
-  border-radius: var(--v-radius-sm, 4px);
-  background: var(--v-bg, #ffffff);
-  color: var(--v-text, #1a1a1a);
-}
-
-.elements {
-  list-style: none;
-  margin: 0;
-  padding: 0;
-}
-
-.element {
-  border-bottom: 1px solid var(--v-surface-border, #d2d2d7);
-}
-
-.element.open {
-  background: var(--v-surface, #f5f5f7);
-}
-
-/* Mirrors the highlight on the capture, so the two views read as one page. */
-.element.active {
-  box-shadow: inset 2px 0 0 var(--v-accent, #3b82f6);
-}
-
-.element-head {
-  display: flex;
-  gap: var(--v-spacing-xs, 4px);
-  align-items: center;
-  min-width: 0;
-}
-
-.element-label {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  gap: var(--v-spacing-xs, 4px);
-  align-items: baseline;
-  min-height: 44px;
-  padding: var(--v-spacing-xs, 4px);
-  border: none;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  text-align: left;
-  cursor: pointer;
-}
-
-.role {
-  flex-shrink: 0;
-  padding: 0 var(--v-spacing-xs, 4px);
-  border-radius: var(--v-radius-xs, 2px);
-  background: var(--v-surface-border, #d2d2d7);
-  color: var(--v-text-secondary, #4a4a4a);
-  font-family: var(--v-font-mono, ui-monospace, monospace);
-  font-size: var(--v-font-size-xs, 10px);
-  text-transform: lowercase;
-}
-
-.name {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .row-action {
@@ -503,72 +297,6 @@ body {
 .row-action:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.element-body {
-  display: flex;
-  flex-direction: column;
-  gap: var(--v-spacing-sm, 8px);
-  padding: 0 var(--v-spacing-xs, 4px) var(--v-spacing-sm, 8px);
-}
-
-.element-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--v-spacing-xs, 4px);
-  font-size: var(--v-font-size-xs, 10px);
-  color: var(--v-text-muted, #8a8a8a);
-}
-
-.attr {
-  font-family: var(--v-font-mono, ui-monospace, monospace);
-  overflow-wrap: anywhere;
-}
-
-.attr-value {
-  color: var(--v-text-secondary, #4a4a4a);
-}
-
-.element-form {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--v-spacing-xs, 4px);
-}
-
-.element-form input {
-  flex: 1 1 8rem;
-  min-width: 0;
-  font-size: 16px;
-  min-height: 32px;
-  padding: var(--v-spacing-xs, 4px) var(--v-spacing-sm, 8px);
-  border: 1px solid var(--v-surface-border, #d2d2d7);
-  border-radius: var(--v-radius-sm, 4px);
-  background: var(--v-bg, #ffffff);
-  color: var(--v-text, #1a1a1a);
-}
-
-.element-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--v-spacing-xs, 4px);
-}
-
-/* ── Text tab ────────────────────────────────────────────────────── */
-
-.text-controls {
-  display: flex;
-  gap: var(--v-spacing-md, 12px);
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: var(--v-spacing-sm, 8px);
-}
-
-.page-text {
-  margin: 0;
-  font-family: var(--v-font-family, system-ui, sans-serif);
-  font-size: var(--v-font-size-base, 14px);
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
 }
 
 /* ── Status bar ──────────────────────────────────────────────────── */
@@ -606,14 +334,6 @@ body {
   flex: 1;
 }
 
-.toggle {
-  display: inline-flex;
-  gap: var(--v-spacing-xs, 4px);
-  align-items: center;
-  cursor: pointer;
-  white-space: nowrap;
-}
-
 /* ── Shared ──────────────────────────────────────────────────────── */
 
 .link-button {
@@ -629,14 +349,6 @@ body {
 .link-button:disabled {
   opacity: 0.5;
   cursor: default;
-}
-
-.muted {
-  color: var(--v-text-muted, #8a8a8a);
-}
-
-.pad {
-  padding: var(--v-spacing-md, 12px);
 }
 
 code {

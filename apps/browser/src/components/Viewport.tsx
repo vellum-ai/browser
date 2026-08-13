@@ -1,149 +1,268 @@
-import type { Action, PageElement, PageView, Rect } from "../api";
+import { useEffect, useRef, useState } from "preact/hooks";
+
+import { fetchFrame, sendInput } from "../api";
+import type { FrameBody, PointerButton } from "../api";
 
 interface Props {
-  view: PageView;
-  busy: boolean;
-  /** The element the rail has expanded, highlighted here to match. */
-  activeEid: string | null;
-  onAct(action: Action): void;
-  onHoverElement(eid: string | null): void;
+  onIdentity(next: { url: string; title: string }): void;
 }
 
+/** Floor between frame requests. The next request starts after the last one lands. */
+const FRAME_MS = 16;
+
 /**
- * The page, and the controls that act on it.
+ * The live page.
  *
- * Driving Playwright in-process is what makes this clickable. Every element the
- * collector found comes back with its geometry, so the capture can carry a
- * transparent hit target over each one — a click there is dispatched by element
- * id, not by guessing at a coordinate, so it lands on the element the user
- * actually pointed at.
- *
- * Boxes are positioned in percentages of the capture's own dimensions, so they
- * track the image at any rendered size without measuring anything.
- *
- * Clicking the background is a real click at that point, for the things no
- * collector can enumerate — a canvas, a map, a custom-drawn control. It is
- * disabled for a full-page capture, where the image is taller than the viewport
- * and a viewport coordinate would mean the wrong thing.
+ * The picture is a stream of frames from the real Chromium, not a still that
+ * the panel scrolls. Wheel, pointer, and keyboard events are forwarded to that
+ * page, so scrolling happens there and the next frame shows the result.
  */
-export function Viewport({ view, busy, activeEid, onAct, onHoverElement }: Props) {
-  const clickable = !view.fullPage && view.screenshot !== null;
+export function Viewport({ onIdentity }: Props) {
+  const stage = useRef<HTMLDivElement | null>(null);
+  const size = useRef({ width: 1280, height: 800 });
+  const wheel = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0, pending: false });
+  const move = useRef({ x: 0, y: 0, pending: false });
+  const frameRef = useRef<FrameBody | null>(null);
+  const identityRef = useRef({ url: "", title: "" });
+  const onIdentityRef = useRef(onIdentity);
+  onIdentityRef.current = onIdentity;
 
-  const boxFor = (element: PageElement): Rect =>
-    view.fullPage ? element.pageRect : element.rect;
+  const [frame, setFrame] = useState<FrameBody | null>(null);
+  frameRef.current = frame;
 
-  const onBackgroundClick = (event: MouseEvent) => {
-    if (!clickable || busy) {
+  useEffect(() => {
+    const node = stage.current;
+    if (node === null) {
       return;
     }
-    const image = event.currentTarget as HTMLElement;
-    const bounds = image.getBoundingClientRect();
+
+    const reportSize = (width: number, height: number) => {
+      if (width < 32 || height < 32) {
+        return;
+      }
+      size.current = { width, height };
+      void sendInput({ type: "resize", width, height }).catch(() => {
+        // A resize that fails is retried on the next observation.
+      });
+    };
+
+    reportSize(node.clientWidth, node.clientHeight);
+    const observer = new ResizeObserver((entries) => {
+      const box = entries[0]?.contentRect;
+      if (box !== undefined) {
+        reportSize(box.width, box.height);
+      }
+    });
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+
+    const tick = async () => {
+      try {
+        const next = await fetchFrame();
+        if (cancelled) {
+          return;
+        }
+        setFrame(next);
+        if (next.url !== "" && (next.url !== identityRef.current.url || next.title !== identityRef.current.title)) {
+          identityRef.current = { url: next.url, title: next.title };
+          onIdentityRef.current(identityRef.current);
+        }
+      } catch {
+        // The next tick retries. A dead browser surfaces through /status.
+      } finally {
+        if (!cancelled) {
+          timer = setTimeout(() => {
+            void tick();
+          }, FRAME_MS);
+        }
+      }
+    };
+
+    void tick();
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const point = (event: { clientX: number; clientY: number }): { x: number; y: number } => {
+    const node = stage.current;
+    if (node === null) {
+      return { x: 0, y: 0 };
+    }
+    const bounds = node.getBoundingClientRect();
     if (bounds.width === 0 || bounds.height === 0) {
+      return { x: 0, y: 0 };
+    }
+    const current = frameRef.current;
+    const width = current?.width ?? size.current.width;
+    const height = current?.height ?? size.current.height;
+    return {
+      x: ((event.clientX - bounds.left) / bounds.width) * width,
+      y: ((event.clientY - bounds.top) / bounds.height) * height,
+    };
+  };
+
+  const flushWheel = () => {
+    const queued = wheel.current;
+    if (!queued.pending) {
       return;
     }
-    // Back from rendered pixels to the capture's own coordinate space, which is
-    // the page's viewport in CSS pixels.
-    const x = ((event.clientX - bounds.left) / bounds.width) * view.capture.width;
-    const y = ((event.clientY - bounds.top) / bounds.height) * view.capture.height;
-    onAct({ action: "click-at", x: Math.round(x), y: Math.round(y) });
+    queued.pending = false;
+    const { x, y, deltaX, deltaY } = queued;
+    queued.deltaX = 0;
+    queued.deltaY = 0;
+    void sendInput({ type: "wheel", x, y, deltaX, deltaY }).catch(() => {
+      // The next wheel event retries.
+    });
+  };
+
+  const flushMove = () => {
+    const queued = move.current;
+    if (!queued.pending) {
+      return;
+    }
+    queued.pending = false;
+    void sendInput({ type: "move", x: queued.x, y: queued.y }).catch(() => {
+      // The next move retries.
+    });
+  };
+
+  useEffect(() => {
+    const node = stage.current;
+    if (node === null) {
+      return;
+    }
+
+    const onWheel = (event: WheelEvent) => {
+      // Must be non-passive: a passive listener cannot preventDefault, and the
+      // panel would then try to scroll a still instead of the real page.
+      event.preventDefault();
+      const at = point(event);
+      const scale = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.current.height : 1;
+      wheel.current.x = at.x;
+      wheel.current.y = at.y;
+      wheel.current.deltaX += event.deltaX * scale;
+      wheel.current.deltaY += event.deltaY * scale;
+      if (!wheel.current.pending) {
+        wheel.current.pending = true;
+        requestAnimationFrame(flushWheel);
+      }
+    };
+
+    node.addEventListener("wheel", onWheel, { passive: false });
+    return () => node.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const buttonOf = (event: MouseEvent): PointerButton => {
+    if (event.button === 2) {
+      return "right";
+    }
+    if (event.button === 1) {
+      return "middle";
+    }
+    return "left";
+  };
+
+  const keyOf = (event: KeyboardEvent): string | null => {
+    if (event.isComposing || event.key === "Dead") {
+      return null;
+    }
+    if (event.key === "Meta" || event.key === "Control" || event.key === "Alt" || event.key === "Shift") {
+      return null;
+    }
+    if (event.key.length === 1) {
+      return event.key;
+    }
+    const parts: string[] = [];
+    if (event.metaKey) {
+      parts.push("Meta");
+    }
+    if (event.ctrlKey) {
+      parts.push("Control");
+    }
+    if (event.altKey) {
+      parts.push("Alt");
+    }
+    if (event.shiftKey) {
+      parts.push("Shift");
+    }
+    parts.push(event.key);
+    return parts.join("+");
   };
 
   return (
-    <div class="viewport">
-      {view.screenshot === null ? (
-        <div class="viewport-fallback">
-          <p>{view.screenshotError ?? "The browser did not return an image for this page."}</p>
-          <p class="muted">
-            The element list and the Text tab still work — a page can be readable and
-            interactive even when it will not render a capture.
-          </p>
-        </div>
+    <div
+      ref={stage}
+      class="viewport"
+      tabIndex={0}
+      role="application"
+      aria-label="Page"
+      onContextMenu={(event) => event.preventDefault()}
+      onMouseMove={(event) => {
+        const at = point(event);
+        move.current.x = at.x;
+        move.current.y = at.y;
+        if (!move.current.pending) {
+          move.current.pending = true;
+          requestAnimationFrame(flushMove);
+        }
+      }}
+      onMouseDown={(event) => {
+        event.preventDefault();
+        stage.current?.focus();
+        const at = point(event);
+        void sendInput({ type: "down", x: at.x, y: at.y, button: buttonOf(event) }).catch(() => {
+          // The matching up still fires.
+        });
+      }}
+      onMouseUp={(event) => {
+        const at = point(event);
+        void sendInput({ type: "up", x: at.x, y: at.y, button: buttonOf(event) }).catch(() => {
+          // Already released, or the page went away.
+        });
+      }}
+      onDblClick={(event) => {
+        const at = point(event);
+        void sendInput({
+          type: "click",
+          x: at.x,
+          y: at.y,
+          button: buttonOf(event),
+          count: 2,
+        }).catch(() => {
+          // A missed double-click is a single click the page already saw.
+        });
+      }}
+      onKeyDown={(event) => {
+        const key = keyOf(event);
+        if (key === null) {
+          return;
+        }
+        event.preventDefault();
+        void sendInput({ type: "key", key }).catch(() => {
+          // The next key retries.
+        });
+      }}
+    >
+      {frame?.screenshot ? (
+        <img
+          class="capture"
+          src={`data:image/jpeg;base64,${frame.screenshot}`}
+          alt={frame.title === "" ? "Current page" : frame.title}
+          draggable={false}
+          decoding="async"
+        />
       ) : (
-        <div
-          class={clickable ? "stage clickable" : "stage"}
-          onClick={onBackgroundClick}
-          onMouseLeave={() => onHoverElement(null)}
-        >
-          <img
-            class="capture"
-            src={`data:image/jpeg;base64,${view.screenshot}`}
-            alt={
-              view.title === ""
-                ? "Screenshot of the current page"
-                : `Screenshot of ${view.title}`
-            }
-          />
-          {view.elements.map((element) => {
-            const box = boxFor(element);
-            return (
-              <button
-                key={element.eid}
-                type="button"
-                class={element.eid === activeEid ? "hit active" : "hit"}
-                disabled={busy}
-                title={`${element.role}${element.name === "" ? "" : `: ${element.name}`}`}
-                aria-label={
-                  element.name === "" ? `${element.role} ${element.eid}` : element.name
-                }
-                style={{
-                  left: `${(box.x / view.capture.width) * 100}%`,
-                  top: `${(box.y / view.capture.height) * 100}%`,
-                  width: `${(box.width / view.capture.width) * 100}%`,
-                  height: `${(box.height / view.capture.height) * 100}%`,
-                }}
-                onMouseEnter={() => onHoverElement(element.eid)}
-                onClick={(event) => {
-                  // The stage's background handler would otherwise also fire and
-                  // send a second, coordinate-based click at the same point.
-                  event.stopPropagation();
-                  onAct({ action: "click", elementId: element.eid });
-                }}
-              />
-            );
-          })}
+        <div class="viewport-fallback">
+          <p>Waiting for the page…</p>
         </div>
       )}
-
-      <div class="scroll-controls">
-        <button
-          type="button"
-          class="icon-button"
-          onClick={() => onAct({ action: "scroll", direction: "up" })}
-          disabled={busy}
-          aria-label="Scroll up"
-          title="Scroll up"
-        >
-          <Arrow direction="up" />
-        </button>
-        <button
-          type="button"
-          class="icon-button"
-          onClick={() => onAct({ action: "scroll", direction: "down" })}
-          disabled={busy}
-          aria-label="Scroll down"
-          title="Scroll down"
-        >
-          <Arrow direction="down" />
-        </button>
-      </div>
-
-      {busy && <div class="loading-veil" aria-hidden="true" />}
     </div>
-  );
-}
-
-function Arrow({ direction }: { direction: "up" | "down" }) {
-  const path = direction === "up" ? "M3 10l5-5 5 5" : "M3 6l5 5 5-5";
-  return (
-    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
-      <path
-        d={path}
-        fill="none"
-        stroke="currentColor"
-        stroke-width="1.6"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      />
-    </svg>
   );
 }

@@ -10,7 +10,7 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -49,5 +49,27 @@ describe("the app opens the window on load", () => {
     expect(source("apps/browser/src/components/StartupBanner.tsx")).toMatch(
       />\s*Start\s*</,
     );
+  });
+});
+
+describe("the app is a live view, not a screenshot picker", () => {
+  test("does not ship the element list or text rail", () => {
+    expect(existsSync(join(ROOT, "apps/browser/src/components/ElementList.tsx"))).toBe(false);
+    expect(existsSync(join(ROOT, "apps/browser/src/components/TextPanel.tsx"))).toBe(false);
+    expect(source("apps/browser/src/components/App.tsx")).not.toContain("ElementList");
+    expect(source("apps/browser/src/components/App.tsx")).not.toContain("TextPanel");
+    expect(source("apps/browser/src/components/App.tsx")).not.toContain("Full page");
+    expect(source("apps/browser/src/styles.css")).not.toContain(".element-label");
+  });
+
+  test("forwards wheel to the page and draws a live frame stream", () => {
+    const viewport = source("apps/browser/src/components/Viewport.tsx");
+    expect(viewport).toContain('addEventListener("wheel"');
+    expect(viewport).toContain("passive: false");
+    expect(viewport).toContain("fetchFrame");
+    expect(source("apps/browser/src/api.ts")).toContain('type: "wheel"');
+    expect(existsSync(join(ROOT, "routes/frame.ts"))).toBe(true);
+    expect(existsSync(join(ROOT, "routes/input.ts"))).toBe(true);
+    expect(existsSync(join(ROOT, "routes/view.ts"))).toBe(false);
   });
 });
