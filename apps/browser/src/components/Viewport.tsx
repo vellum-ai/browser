@@ -10,25 +10,31 @@ interface Props {
 /** Floor between frame requests. The next request starts after the last one lands. */
 const FRAME_MS = 16;
 
+/** Two mouseups inside this window are one double-click. */
+const DBLCLICK_MS = 400;
+
 /**
  * The live page.
  *
  * The picture is a stream of frames from the real Chromium, not a still that
  * the panel scrolls. Wheel, pointer, and keyboard events are forwarded to that
  * page, so scrolling happens there and the next frame shows the result.
+ *
+ * Clicks are mapped through the size we last told Playwright to use, not the
+ * JPEG's own dimensions. Those two disagree after a resize, and using the
+ * picture size is how a click in the panel landed off the page.
  */
 export function Viewport({ onIdentity }: Props) {
   const stage = useRef<HTMLDivElement | null>(null);
   const size = useRef({ width: 1280, height: 800 });
   const wheel = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0, pending: false });
   const move = useRef({ x: 0, y: 0, pending: false });
-  const frameRef = useRef<FrameBody | null>(null);
+  const lastClickAt = useRef(0);
   const identityRef = useRef({ url: "", title: "" });
   const onIdentityRef = useRef(onIdentity);
   onIdentityRef.current = onIdentity;
 
   const [frame, setFrame] = useState<FrameBody | null>(null);
-  frameRef.current = frame;
 
   useEffect(() => {
     const node = stage.current;
@@ -40,10 +46,13 @@ export function Viewport({ onIdentity }: Props) {
       if (width < 32 || height < 32) {
         return;
       }
-      size.current = { width, height };
-      void sendInput({ type: "resize", width, height }).catch(() => {
-        // A resize that fails is retried on the next observation.
-      });
+      void sendInput({ type: "resize", width, height })
+        .then((applied) => {
+          size.current = { width: applied.width, height: applied.height };
+        })
+        .catch(() => {
+          // A resize that fails is retried on the next observation.
+        });
     };
 
     reportSize(node.clientWidth, node.clientHeight);
@@ -68,6 +77,9 @@ export function Viewport({ onIdentity }: Props) {
           return;
         }
         setFrame(next);
+        if (next.width > 0 && next.height > 0) {
+          size.current = { width: next.width, height: next.height };
+        }
         if (next.url !== "" && (next.url !== identityRef.current.url || next.title !== identityRef.current.title)) {
           identityRef.current = { url: next.url, title: next.title };
           onIdentityRef.current(identityRef.current);
@@ -99,12 +111,9 @@ export function Viewport({ onIdentity }: Props) {
     if (bounds.width === 0 || bounds.height === 0) {
       return { x: 0, y: 0 };
     }
-    const current = frameRef.current;
-    const width = current?.width ?? size.current.width;
-    const height = current?.height ?? size.current.height;
     return {
-      x: ((event.clientX - bounds.left) / bounds.width) * width,
-      y: ((event.clientY - bounds.top) / bounds.height) * height,
+      x: ((event.clientX - bounds.left) / bounds.width) * size.current.width,
+      y: ((event.clientY - bounds.top) / bounds.height) * size.current.height,
     };
   };
 
@@ -216,27 +225,20 @@ export function Viewport({ onIdentity }: Props) {
       onMouseDown={(event) => {
         event.preventDefault();
         stage.current?.focus();
-        const at = point(event);
-        void sendInput({ type: "down", x: at.x, y: at.y, button: buttonOf(event) }).catch(() => {
-          // The matching up still fires.
-        });
       }}
       onMouseUp={(event) => {
         const at = point(event);
-        void sendInput({ type: "up", x: at.x, y: at.y, button: buttonOf(event) }).catch(() => {
-          // Already released, or the page went away.
-        });
-      }}
-      onDblClick={(event) => {
-        const at = point(event);
+        const now = Date.now();
+        const count = now - lastClickAt.current < DBLCLICK_MS ? 2 : 1;
+        lastClickAt.current = now;
         void sendInput({
           type: "click",
           x: at.x,
           y: at.y,
           button: buttonOf(event),
-          count: 2,
+          count,
         }).catch(() => {
-          // A missed double-click is a single click the page already saw.
+          // The next click retries.
         });
       }}
       onKeyDown={(event) => {

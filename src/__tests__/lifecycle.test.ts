@@ -72,4 +72,27 @@ describe("the app is a live view, not a screenshot picker", () => {
     expect(existsSync(join(ROOT, "routes/input.ts"))).toBe(true);
     expect(existsSync(join(ROOT, "routes/view.ts"))).toBe(false);
   });
+
+  test("clicks the page as one Playwright click, in the panel's own size", () => {
+    const viewport = source("apps/browser/src/components/Viewport.tsx");
+    expect(viewport).toContain('type: "click"');
+    expect(viewport).toContain("size.current.width");
+    expect(viewport).not.toContain("frameRef");
+    expect(source("apps/browser/src/api.ts")).toContain("inputChain");
+    expect(source("routes/input.ts")).toContain("exclusive");
+    expect(source("routes/frame.ts")).toContain("currentViewport()");
+  });
+});
+
+describe("the chrome is just the address bar", () => {
+  test("has no Open button, Ask the assistant, or Close browser", () => {
+    const app = source("apps/browser/src/components/App.tsx");
+    const bar = source("apps/browser/src/components/AddressBar.tsx");
+    expect(bar).not.toContain("Open");
+    expect(bar).not.toContain('class="go"');
+    expect(app).not.toContain("Ask the assistant");
+    expect(app).not.toContain("Close browser");
+    expect(app).not.toContain("canRelayPrompt");
+    expect(app).not.toContain("closeBrowser");
+  });
 });

@@ -102,10 +102,6 @@ does not need an assistant restart to recover.
 - **The page**: a live view of Chromium. Scroll, click, and type on it. The
   panel does not scroll a screenshot; wheel and pointer events go to the page.
 - **Back / forward / reload**: the page's real history.
-- **Ask the assistant**: hand the open page to the assistant as a prompt.
-  Hidden when the host does not support relaying.
-- **Close browser**: shuts Chromium down to free the memory. The profile stays,
-  so the next page opens still signed in.
 
 ## Configuration
 

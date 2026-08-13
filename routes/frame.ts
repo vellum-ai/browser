@@ -45,8 +45,12 @@ export async function GET(): Promise<Response> {
     await startScreencast(page);
 
     const frame = latestFrame();
+    const size = currentViewport();
     if (frame !== null) {
-      return ok(await bodyOf(page, frame.jpeg, frame.width, frame.height));
+      // Width/height are the Playwright viewport, not the JPEG or CDP
+      // deviceWidth. Clicks are dispatched in that space; a stale 1280x800
+      // frame size on a 400px panel is how most clicks missed the page.
+      return ok(await bodyOf(page, frame.jpeg, size.width, size.height));
     }
 
     // First paint only: the stream has not produced a frame yet. Later empty
@@ -55,14 +59,12 @@ export async function GET(): Promise<Response> {
       firstPaintTaken = true;
       try {
         const buffer = await page.screenshot({ type: "jpeg", quality: 55 });
-        const size = currentViewport();
         return ok(await bodyOf(page, buffer.toString("base64"), size.width, size.height));
       } catch {
         // Fall through to an empty frame; the next poll retries the stream.
       }
     }
 
-    const size = currentViewport();
     return ok(await bodyOf(page, null, size.width, size.height));
   });
 }

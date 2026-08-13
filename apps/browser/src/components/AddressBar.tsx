@@ -28,9 +28,7 @@ interface Props {
  *
  * Deliberately not a `<form>`. The app runs in an iframe sandboxed with
  * `allow-scripts` and no `allow-forms`, so the browser blocks the submission
- * outright and the `submit` event never fires — the button and the Enter key
- * would both silently do nothing. Submitting is wired to a click handler and an
- * explicit Enter key handler instead.
+ * outright and the `submit` event never fires. Enter is handled here instead.
  */
 export function AddressBar({
   value,
@@ -107,6 +105,7 @@ export function AddressBar({
         autocapitalize="off"
         aria-label="Address"
         placeholder="Enter a URL or search"
+        title="Press Enter to open"
         onInput={(event) => setDraft(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Enter") {
@@ -121,15 +120,6 @@ export function AddressBar({
           }
         }}
       />
-
-      <button
-        type="button"
-        class="go"
-        onClick={submit}
-        disabled={busy || draft.trim() === ""}
-      >
-        {busy ? "Working…" : "Open"}
-      </button>
     </div>
   );
 }

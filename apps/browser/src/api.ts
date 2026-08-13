@@ -162,9 +162,27 @@ export function fetchFrame(): Promise<FrameBody> {
   return request<FrameBody>("/frame");
 }
 
-/** Pointer, wheel, keyboard, or a panel resize. Does not wait for a new picture. */
-export function sendInput(input: Input): Promise<{ ok: true }> {
-  return post<{ ok: true }>("/input", input);
+export interface InputResult {
+  ok: true;
+  width: number;
+  height: number;
+}
+
+/**
+ * Pointer, wheel, keyboard, or a panel resize. Does not wait for a new picture.
+ *
+ * Calls run one at a time. A `down` and an `up` that overlap never become a
+ * click, which is how taps on the page were disappearing.
+ */
+let inputChain: Promise<unknown> = Promise.resolve();
+
+export function sendInput(input: Input): Promise<InputResult> {
+  const next = inputChain.then(() => post<InputResult>("/input", input));
+  inputChain = next.then(
+    () => undefined,
+    () => undefined,
+  );
+  return next;
 }
 
 /** Back, forward, or reload. */
@@ -172,26 +190,3 @@ export function act(action: HistoryAction): Promise<PageIdentity> {
   return post<PageIdentity>("/act", { action });
 }
 
-/** Shut the browser down. The profile survives, so logins do too. */
-export function closeBrowser(): Promise<{ closed: true }> {
-  return post<{ closed: true }>("/close", {});
-}
-
-/**
- * Hand a prompt to the assistant as if the user had typed it. Returns false
- * when the host did not inject `sendAction`, so callers can hide the affordance
- * rather than offering a button that does nothing.
- */
-export function relayPrompt(prompt: string): boolean {
-  const send = window.vellum.sendAction;
-  if (typeof send !== "function") {
-    return false;
-  }
-  send.call(window.vellum, "relay_prompt", { prompt });
-  return true;
-}
-
-/** True when the host supports relaying prompts. */
-export function canRelayPrompt(): boolean {
-  return typeof window.vellum.sendAction === "function";
-}
