@@ -3,49 +3,13 @@
  *
  * The wire types mirror the route modules under `<pluginDir>/routes/`. They are
  * declared here rather than imported because the app compiles as its own bundle
- * and cannot reach outside its directory — so this file is the contract's
+ * and cannot reach outside its directory, so this file is the contract's
  * app-side half, and the two move together.
  */
 
 const BASE = "/x/plugins/browser";
 
 // ── Wire types ───────────────────────────────────────────────────────
-
-/** A rectangle in CSS pixels. */
-export interface Rect {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-}
-
-/** One interactive element on the page, addressable by `eid`. */
-export interface PageElement {
-  eid: string;
-  role: string;
-  name: string;
-  attrs: Record<string, string>;
-  value?: string;
-  /** Position in the viewport — where to draw a box on a viewport capture. */
-  rect: Rect;
-  /** Position in the document — the same, for a full-page capture. */
-  pageRect: Rect;
-}
-
-/** What every page-touching route returns. */
-export interface PageView {
-  url: string;
-  title: string;
-  elements: PageElement[];
-  /** Base64 JPEG, or null when the capture failed. */
-  screenshot: string | null;
-  screenshotError: string | null;
-  fullPage: boolean;
-  /** Size of the capture in CSS pixels, for mapping element boxes onto it. */
-  capture: { width: number; height: number };
-  scroll: { x: number; y: number };
-  message: string | null;
-}
 
 export type BrowserSource =
   | "system-chrome"
@@ -61,42 +25,41 @@ export interface StatusBody {
   error: { message: string; hint: string | null } | null;
 }
 
-export interface ExtractBody {
-  text: string;
+export interface PageIdentity {
   url: string;
+  title: string;
+  message: string | null;
 }
 
-/** Every action the `act` route accepts, with its arguments. */
-export type Action =
-  | { action: "click" | "hover"; elementId: string }
-  | {
-      action: "type";
-      elementId: string;
-      text: string;
-      pressEnter?: boolean;
-      clearFirst?: boolean;
-    }
-  | { action: "press-key"; key: string; elementId?: string }
-  | { action: "scroll"; direction: "up" | "down" | "left" | "right"; amount?: number }
-  | {
-      action: "select-option";
-      elementId: string;
-      value?: string;
-      label?: string;
-      index?: number;
-    }
-  | { action: "click-at"; x: number; y: number }
-  | { action: "back" | "forward" | "reload" };
+export interface FrameBody {
+  screenshot: string | null;
+  width: number;
+  height: number;
+  url: string;
+  title: string;
+}
+
+export type HistoryAction = "back" | "forward" | "reload";
+
+export type PointerButton = "left" | "right" | "middle";
+
+export type Input =
+  | { type: "wheel"; x: number; y: number; deltaX: number; deltaY: number }
+  | { type: "move"; x: number; y: number }
+  | { type: "down"; x: number; y: number; button?: PointerButton }
+  | { type: "up"; x: number; y: number; button?: PointerButton }
+  | { type: "click"; x: number; y: number; button?: PointerButton; count?: number }
+  | { type: "key"; key: string }
+  | { type: "resize"; width: number; height: number };
 
 // ── Transport ────────────────────────────────────────────────────────
 
 /**
  * A route that answered with a failure.
  *
- * Routes return `{ error, hint? }`, and the hint is the actionable half — a
- * stale element id comes back with "reload the page", a missing Chromium with
- * the command that installs it — so it survives as its own field rather than
- * being flattened into the message.
+ * Routes return `{ error, hint? }`, and the hint is the actionable half: a
+ * missing Chromium comes back with the command that installs it, so it survives
+ * as its own field rather than being flattened into the message.
  */
 export class ApiError extends Error {
   readonly status: number;
@@ -117,8 +80,8 @@ export class ApiError extends Error {
  * what went wrong. A body without one did not: the assistant's route dispatcher
  * answers 500 on its own when a route module cannot be imported or throws
  * outside its handler, and that response carries no message. Rendering the bare
- * status there produced "Request failed (500 )." — technically true and no help
- * at all — so that case names where to look instead.
+ * status there produced "Request failed (500 )." which is technically true and
+ * no help at all, so that case names where to look instead.
  */
 function toApiError(status: number, statusText: string, payload: unknown): ApiError {
   if (typeof payload === "object" && payload !== null) {
@@ -132,7 +95,7 @@ function toApiError(status: number, statusText: string, payload: unknown): ApiEr
     return new ApiError(
       "The browser plugin did not respond.",
       status,
-      "The assistant's log has the plugin's own error — check it with `assistant logs`, and `assistant plugins list` for the plugin's load status.",
+      "The assistant's log has the plugin's own error. Check it with `assistant logs`, and `assistant plugins list` for the plugin's load status.",
     );
   }
 
@@ -145,7 +108,6 @@ async function request<T>(path: string, init?: VellumFetchInit): Promise<T> {
   try {
     response = await window.vellum.fetch(`${BASE}${path}`, init);
   } catch (err) {
-    // The bridge itself failed — the host did not deliver the request at all.
     throw new ApiError(
       err instanceof Error ? err.message : "The assistant could not be reached.",
       0,
@@ -191,23 +153,23 @@ export function startBrowser(): Promise<StatusBody> {
 }
 
 /** Load a page from raw address-bar input (a URL, a host, or a search phrase). */
-export function navigate(input: string, fullPage: boolean): Promise<PageView> {
-  return post<PageView>("/navigate", { input, fullPage });
+export function navigate(input: string): Promise<PageIdentity> {
+  return post<PageIdentity>("/navigate", { input });
 }
 
-/** Re-read the current page without changing it. */
-export function fetchView(fullPage: boolean): Promise<PageView> {
-  return request<PageView>(`/view${fullPage ? "?fullPage=1" : ""}`);
+/** The latest live picture of the page. */
+export function fetchFrame(): Promise<FrameBody> {
+  return request<FrameBody>("/frame");
 }
 
-/** Interact with the page, and get back what it looks like afterwards. */
-export function act(action: Action, fullPage: boolean): Promise<PageView> {
-  return post<PageView>("/act", { ...action, fullPage });
+/** Pointer, wheel, keyboard, or a panel resize. Does not wait for a new picture. */
+export function sendInput(input: Input): Promise<{ ok: true }> {
+  return post<{ ok: true }>("/input", input);
 }
 
-/** Read the page as text. */
-export function fetchText(includeLinks: boolean): Promise<ExtractBody> {
-  return request<ExtractBody>(`/extract${includeLinks ? "?includeLinks=1" : ""}`);
+/** Back, forward, or reload. */
+export function act(action: HistoryAction): Promise<PageIdentity> {
+  return post<PageIdentity>("/act", { action });
 }
 
 /** Shut the browser down. The profile survives, so logins do too. */

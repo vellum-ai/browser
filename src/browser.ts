@@ -33,11 +33,10 @@ import { fileURLToPath } from "node:url";
 import type { Browser, BrowserContext, Page } from "playwright";
 import { chromium } from "playwright";
 
+import { DEFAULT_VIEWPORT, startScreencast, stopScreencast } from "./screencast.js";
+
 /** How long the on-demand Chrome for Testing download is allowed to take. */
 const BROWSER_INSTALL_TIMEOUT_MS = 300_000;
-
-/** Viewport the page runs at, and therefore the size of every capture. */
-export const VIEWPORT = { width: 1280, height: 800 } as const;
 
 /**
  * This module sits at `<pluginDir>/src/browser.ts`, so the plugin root is two
@@ -292,7 +291,7 @@ let lastError: BrowserError | null = null;
 async function launch(): Promise<BrowserContext> {
   mkdirSync(PROFILE_DIR, { recursive: true });
   const headless = !canDisplayGui();
-  const options = { headless, viewport: { ...VIEWPORT } };
+  const options = { headless, viewport: { ...DEFAULT_VIEWPORT } };
 
   const resolved = resolveBrowser();
 
@@ -422,10 +421,10 @@ export function isStarting(): boolean {
 export async function ensurePage(): Promise<Page> {
   const ctx = await ensureContext();
   const existing = ctx.pages()[0];
-  if (existing !== undefined && !existing.isClosed()) {
-    return existing;
-  }
-  return ctx.newPage();
+  const page =
+    existing !== undefined && !existing.isClosed() ? existing : await ctx.newPage();
+  await startScreencast(page);
+  return page;
 }
 
 /** True when the browser is up. Read by the status route; never launches. */
@@ -448,6 +447,7 @@ export function describeBrowser(): { source: BrowserSource } {
 export async function closeBrowser(): Promise<void> {
   const open = context;
   context = null;
+  await stopScreencast();
   if (open === null) {
     return;
   }

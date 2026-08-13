@@ -1,16 +1,17 @@
 /**
- * `POST /x/plugins/browser/navigate` — load a page.
+ * `POST /x/plugins/browser/navigate`: load a page.
  *
  * Body: `{ "input": "example.com" }`, the raw address-bar value. Resolving it
  * to a URL (or a search) happens here so there is one place that decides what a
- * typed string means. Answers with a fresh view, so a navigation is a single
- * round trip.
+ * typed string means. Answers with the page identity; the live frame stream is
+ * what the panel draws.
  */
 
 import { ensurePage } from "../src/browser.js";
 import { handle, ok, readJson, requireString } from "../src/http.js";
 import { resolveTarget } from "../src/url.js";
-import { captureView } from "../src/view.js";
+import { pageIdentity } from "../src/view.js";
+import type { PageIdentity } from "../src/view.js";
 
 /**
  * Navigation waits for the DOM, not for every last subresource. `load` on an
@@ -31,11 +32,10 @@ export async function POST(request: Request): Promise<Response> {
       waitUntil: "domcontentloaded",
     });
 
-    return ok(
-      await captureView({
-        fullPage: body.fullPage === true,
-        message: target.searched ? `Searched for “${input}”` : null,
-      }),
+    const identity: PageIdentity = await pageIdentity(
+      page,
+      target.searched ? `Searched for “${input}”` : null,
     );
+    return ok(identity);
   });
 }

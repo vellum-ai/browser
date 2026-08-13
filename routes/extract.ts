@@ -1,9 +1,8 @@
 /**
- * `GET /x/plugins/browser/extract` — the page as readable text.
+ * `GET /x/plugins/browser/extract`: the page as readable text.
  *
- * Backs the app's Text tab, which is what makes a capture-based browser usable
- * for actually reading a page: selectable, scrollable, and searchable with the
- * panel's own find. `?includeLinks=1` appends the page's links.
+ * `?includeLinks=1` appends the page's links. The app no longer shows this;
+ * it is for the assistant.
  */
 
 import { ensurePage } from "../src/browser.js";
