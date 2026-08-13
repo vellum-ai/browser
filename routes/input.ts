@@ -89,11 +89,8 @@ export async function POST(request: Request): Promise<Response> {
 }
 
 /**
- * Required number, local to this file.
- *
- * Do not import a newly added export from `http.ts`. After a plugin upgrade
- * Bun may reload this route against a cached `http.ts` that does not have
- * the new name, which 500s every click while `/frame` keeps working.
+ * Required number field. Kept in this file rather than `http.ts` so a route
+ * reload cannot bind to a cached `http.ts` that does not export it.
  */
 function requireNumber(body: Record<string, unknown>, field: string): number {
   const value = optionalNumber(body, field);
