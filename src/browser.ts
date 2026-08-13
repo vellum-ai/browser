@@ -11,10 +11,11 @@
  *
  * The context is a module singleton because the plugin is one browser, not one
  * per request: routes and hooks import this module by the same specifier, so
- * they share the instance. `init` launches it at boot and `shutdown` closes it.
- * {@link ensurePage} is still lazy and single-flight, so a request that lands
- * before the boot launch settles waits for that same launch instead of starting
- * a second one.
+ * they share the instance. `init` installs Chromium at boot (download only) and
+ * `shutdown` closes a running context. The window itself opens when the app
+ * loads, via `POST /start`. {@link ensurePage} is still lazy and single-flight,
+ * so a request that lands before that start settles waits for the same launch
+ * instead of starting a second one.
  *
  * ## Getting a browser to launch
  *
@@ -269,11 +270,12 @@ async function installChromeForTesting(): Promise<void> {
 
 let context: BrowserContext | null = null;
 let launching: Promise<BrowserContext> | null = null;
+let installing: Promise<void> | null = null;
 
 /**
- * Why the last launch failed, kept so the app can show it.
+ * Why the last install or launch failed, kept so the app can show it.
  *
- * Without this a failed launch is only a log line: the app sees "not running"
+ * Without this a failed start is only a log line: the app sees "not running"
  * and cannot say why, which is exactly the dead end where the address bar
  * appears to do nothing. It is cleared on a successful launch.
  */
@@ -316,8 +318,43 @@ async function launch(): Promise<BrowserContext> {
     }
   }
 
-  await installChromeForTesting();
+  await ensureInstalled();
   return chromium.launchPersistentContext(PROFILE_DIR, options);
+}
+
+/**
+ * Make sure a Chromium this plugin can drive is on disk.
+ *
+ * Download only: no window. `init` calls this at boot so a fresh install pays
+ * the multi-minute Chrome for Testing fetch in the background, and the app can
+ * open a window on load without starting that download from a button click.
+ *
+ * Single-flight and a no-op when something is already resolvable. A failed
+ * install is not cached, so the next call retries.
+ */
+export async function ensureInstalled(): Promise<void> {
+  if (resolveBrowser().source !== "none") {
+    return;
+  }
+  if (installing !== null) {
+    return installing;
+  }
+
+  installing = installChromeForTesting()
+    .catch((err: unknown) => {
+      lastError =
+        err instanceof BrowserError
+          ? err
+          : new BrowserError(err instanceof Error ? err.message : String(err), {
+              status: 503,
+            });
+      throw lastError;
+    })
+    .finally(() => {
+      installing = null;
+    });
+
+  return installing;
 }
 
 /**
@@ -370,9 +407,9 @@ export function getLastError(): { message: string; hint: string | null } | null 
     : { message: lastError.message, hint: lastError.hint ?? null };
 }
 
-/** True while a launch is in progress, so the app can say so rather than guess. */
+/** True while an install or launch is in progress, so the app can say so rather than guess. */
 export function isStarting(): boolean {
-  return launching !== null;
+  return launching !== null || installing !== null;
 }
 
 /**

@@ -1,11 +1,13 @@
 /**
- * `POST /x/plugins/browser/start` — start the browser, or try again.
+ * `POST /x/plugins/browser/start`: start the browser, or try again.
  *
- * Backs the app's Retry button. `init` already attempts a launch at boot, but a
- * boot-time failure is not permanent — a machine can gain a Chromium, a
- * download can succeed on a second attempt, a transient launch error can clear
- * — and without an explicit retry the only way back would be restarting the
- * daemon.
+ * Backs the app's load path and its Start / Retry button. `init` installs
+ * Chromium at boot but does not open a window. The app calls this when it
+ * opens, and again if that launch fails or the user closed the browser. A
+ * boot-time install failure is not permanent: a machine can gain a Chromium, a
+ * download can succeed on a second attempt, a transient launch error can clear,
+ * and without an explicit retry the only way back would be restarting the
+ * assistant.
  *
  * Answers with the same shape as `/status` either way. A failed start is not an
  * error response: the app renders the reason out of the status body, and a 500

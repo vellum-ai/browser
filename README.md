@@ -15,7 +15,7 @@ One surface does the work and two support it:
 | --------------- | ---------------- | ----------------------------------------------------------------------------------------- |
 | App             | `apps/browser/`  | The browser UI, rendered in the workspace panel. This is the plugin.                      |
 | HTTP routes     | `routes/`        | The app's backend, served under `/x/plugins/browser/`. One call per interaction.          |
-| Lifecycle hooks | `hooks/`         | `init` starts the browser at boot; `shutdown` closes it.                                  |
+| Lifecycle hooks | `hooks/`         | `init` installs Chromium at boot; `shutdown` closes a running window.                     |
 
 Everything under `src/` is internal: the browser lifecycle, the in-page element
 collector, address-bar resolution, and shared HTTP helpers.
@@ -92,22 +92,25 @@ and fetches whatever the registry serves — downloading a browser at *that*
 version's revision while `executablePath()` still points at the one this package
 pins. The install appears to succeed and the browser is still missing.
 
-`init` kicks this off at boot so the wait is paid in the background rather than
-by whoever types the first URL. It does not block: a request arriving mid-launch
-joins the launch already running.
+`init` kicks the download off at boot so the wait is paid in the background
+rather than by whoever opens the app. It does not open a window and it does not
+block: the hook returns immediately, and a start that arrives mid-install joins
+the install already running.
 
-When a launch fails, the reason is kept and surfaced. The app shows it with the
-remediation the route reported and a **Retry** button (`POST /start`), so a
-machine that gains a Chromium — or a download that fails once — does not need a
-daemon restart to recover.
+The app opens the window when it loads (`POST /start`). The Start button stays
+as a retry if that launch fails, or if the user later closes the browser. When
+a launch fails, the reason is kept and surfaced with the remediation the route
+reported, so a machine that gains a Chromium (or a download that fails once)
+does not need an assistant restart to recover.
 
 ## The app
 
 - **Address bar** — a URL, a bare host (`example.com:8080/health` works), or a
   search phrase, which goes to DuckDuckGo. Only `http` and `https` are opened;
   `javascript:`, `data:`, and `file:` are refused.
-- **Browser state** — before a page is open, a line says whether the browser is
-  ready, starting, or down. Down shows the reason and a Retry button.
+- **Browser state**: the window opens when the app loads. Before a page is
+  open, a line says whether the browser is ready, starting, or down. Down shows
+  the reason and a Start / Retry button.
 - **The page** — click an element, or click anywhere. Hovering an element
   highlights it in the list beside it, and vice versa.
 - **Back / forward / reload** — the page's real history.
@@ -140,7 +143,7 @@ URL and no auth and fails.
 | Route       | Method | Purpose                                                                          |
 | ----------- | ------ | -------------------------------------------------------------------------------- |
 | `/status`   | GET    | Whether the browser is up, which Chromium backs it, and why a launch failed. Never launches. |
-| `/start`    | POST   | Start the browser, or retry after a failed launch. Answers like `/status`.       |
+| `/start`    | POST   | Open the window, or retry after a failed launch. Called on app load. Answers like `/status`. |
 | `/navigate` | POST   | `{ input }` — raw address-bar value. Returns the page that loaded.               |
 | `/view`     | GET    | Re-read the current page. `?fullPage=1` for the whole scrollable page.           |
 | `/act`      | POST   | `{ action, … }` — click, click-at, hover, type, press-key, scroll, select-option, back, forward, reload. |

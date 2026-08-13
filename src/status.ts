@@ -11,7 +11,7 @@ import type { BrowserSource } from "./browser.js";
 export interface StatusBody {
   /** True once the browser is launched and usable. */
   running: boolean;
-  /** True while a launch is in flight. */
+  /** True while an install or a launch is in flight. */
   starting: boolean;
   /**
    * Which Chromium backs it, or `none` when the machine has nothing to drive

@@ -182,9 +182,9 @@ export function fetchStatus(): Promise<StatusBody> {
 }
 
 /**
- * Start the browser, or retry after a failed launch. Answers with the same
- * shape as `/status`, so a failure comes back as state to render rather than as
- * a thrown error.
+ * Open the Chromium window, or retry after a failed launch. Answers with the
+ * same shape as `/status`, so a failure comes back as state to render rather
+ * than as a thrown error.
  */
 export function startBrowser(): Promise<StatusBody> {
   return post<StatusBody>("/start", {});
