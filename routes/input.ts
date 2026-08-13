@@ -13,7 +13,6 @@ import {
   optionalNumber,
   optionalString,
   readJson,
-  requireNumber,
   requireString,
 } from "../src/http.js";
 import { exclusive } from "../src/lock.js";
@@ -87,6 +86,18 @@ export async function POST(request: Request): Promise<Response> {
       return ok({ ok: true as const, ...currentViewport() });
     });
   });
+}
+
+/**
+ * Required number field. Kept in this file rather than `http.ts` so a route
+ * reload cannot bind to a cached `http.ts` that does not export it.
+ */
+function requireNumber(body: Record<string, unknown>, field: string): number {
+  const value = optionalNumber(body, field);
+  if (value === undefined) {
+    throw new BrowserError(`\`${field}\` is required.`, { status: 400 });
+  }
+  return value;
 }
 
 function pointOf(body: Record<string, unknown>): { x: number; y: number } {
