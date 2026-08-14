@@ -38,7 +38,36 @@ export interface FrameBody {
   url: string;
   title: string;
   seq: number;
+  tabId: string;
 }
+
+export interface TabInfo {
+  id: string;
+  title: string;
+  url: string;
+  active: boolean;
+}
+
+export interface WindowInfo {
+  id: string;
+  label: string;
+  active: boolean;
+  tabs: TabInfo[];
+}
+
+export interface SessionInfo {
+  windows: WindowInfo[];
+  activeWindowId: string;
+  activeTabId: string;
+}
+
+export type SessionAction =
+  | { action: "new-tab"; windowId?: string }
+  | { action: "close-tab"; tabId: string }
+  | { action: "select-tab"; tabId: string }
+  | { action: "new-window" }
+  | { action: "close-window"; windowId: string }
+  | { action: "select-window"; windowId: string };
 
 export type HistoryAction = "back" | "forward" | "reload";
 
@@ -291,5 +320,15 @@ export function sendInput(input: Input): Promise<InputResult> {
 /** Back, forward, or reload. */
 export function act(action: HistoryAction): Promise<PageIdentity> {
   return post<PageIdentity>("/act", { action });
+}
+
+/** Windows and tabs. */
+export function fetchSession(): Promise<SessionInfo> {
+  return request<SessionInfo>("/session");
+}
+
+/** Add, close, or select a tab or window. */
+export function mutateSession(body: SessionAction): Promise<SessionInfo> {
+  return post<SessionInfo>("/session", body);
 }
 

@@ -5,7 +5,7 @@
  * it is for the assistant.
  */
 
-import { ensurePage } from "../src/browser.js";
+import { ensurePage } from "../src/session.js";
 import { boolParam, handle, ok } from "../src/http.js";
 import { extractText } from "../src/snapshot.js";
 

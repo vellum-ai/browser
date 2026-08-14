@@ -115,7 +115,7 @@ describe("the app is a live view, not a screenshot picker", () => {
   });
 });
 
-describe("the chrome is just the address bar", () => {
+describe("the chrome has windows, tabs, and the address bar", () => {
   test("has no Open button, Ask the assistant, or Close browser", () => {
     const app = source("apps/browser/src/components/App.tsx");
     const bar = source("apps/browser/src/components/AddressBar.tsx");
@@ -125,5 +125,16 @@ describe("the chrome is just the address bar", () => {
     expect(app).not.toContain("Close browser");
     expect(app).not.toContain("canRelayPrompt");
     expect(app).not.toContain("closeBrowser");
+  });
+
+  test("can add and remove tabs and windows, keeping at least one of each", () => {
+    expect(source("apps/browser/src/components/Chrome.tsx")).toContain("New tab");
+    expect(source("apps/browser/src/components/Chrome.tsx")).toContain("New window");
+    expect(source("apps/browser/src/components/App.tsx")).toContain("new-tab");
+    expect(source("apps/browser/src/components/App.tsx")).toContain("new-window");
+    expect(source("src/session.ts")).toContain("Keep at least one tab.");
+    expect(source("src/session.ts")).toContain("Keep at least one window.");
+    expect(source("routes/start.ts")).toContain("ensureSession");
+    expect(existsSync(join(ROOT, "routes/session.ts"))).toBe(true);
   });
 });

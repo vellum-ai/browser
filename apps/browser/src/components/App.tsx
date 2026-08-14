@@ -1,8 +1,17 @@
 import { useCallback, useEffect, useState } from "preact/hooks";
 
-import { ApiError, act, fetchStatus, navigate, startBrowser } from "../api";
-import type { HistoryAction, StatusBody } from "../api";
+import {
+  ApiError,
+  act,
+  fetchSession,
+  fetchStatus,
+  mutateSession,
+  navigate,
+  startBrowser,
+} from "../api";
+import type { HistoryAction, SessionInfo, StatusBody } from "../api";
 import { AddressBar } from "./AddressBar";
+import { TabBar, WindowBar } from "./Chrome";
 import { ErrorBanner } from "./ErrorBanner";
 import { StartupBanner } from "./StartupBanner";
 import { Viewport } from "./Viewport";
@@ -14,8 +23,13 @@ function asApiError(err: unknown): ApiError {
     : new ApiError(err instanceof Error ? err.message : String(err), 0, null);
 }
 
+function emptySession(): SessionInfo {
+  return { windows: [], activeWindowId: "", activeTabId: "" };
+}
+
 export function App() {
   const [status, setStatus] = useState<StatusBody | null>(null);
+  const [session, setSession] = useState<SessionInfo>(emptySession);
   const [address, setAddress] = useState("");
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
@@ -25,6 +39,16 @@ export function App() {
     if (url !== "") {
       setAddress(url);
     }
+  }, []);
+
+  const applySession = useCallback((next: SessionInfo) => {
+    setSession(next);
+    const window = next.windows.find((item) => item.id === next.activeWindowId);
+    const tab = window?.tabs.find((item) => item.id === next.activeTabId);
+    if (tab === undefined) {
+      return;
+    }
+    setAddress(tab.url === "about:blank" ? "" : tab.url);
   }, []);
 
   /**
@@ -73,28 +97,94 @@ export function App() {
     };
   }, [begin]);
 
+  const running = status?.running === true;
+
+  useEffect(() => {
+    if (!running) {
+      setSession(emptySession());
+      return;
+    }
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const next = await fetchSession();
+        if (!cancelled) {
+          applySession(next);
+        }
+      } catch {
+        // The next tick retries.
+      }
+    };
+    void tick();
+    const timer = setInterval(() => {
+      void tick();
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [running, applySession]);
+
   const go = useCallback((input: string) => {
     setBusy(true);
     setError(null);
     void navigate(input)
-      .then((next) => applyUrl(next.url))
+      .then((next) => {
+        applyUrl(next.url);
+        return fetchSession();
+      })
+      .then(applySession)
       .catch((err: unknown) => setError(asApiError(err)))
       .finally(() => setBusy(false));
-  }, [applyUrl]);
+  }, [applySession, applyUrl]);
 
   const perform = useCallback((action: HistoryAction) => {
     setBusy(true);
     setError(null);
     void act(action)
-      .then((next) => applyUrl(next.url))
+      .then((next) => {
+        applyUrl(next.url);
+        return fetchSession();
+      })
+      .then(applySession)
       .catch((err: unknown) => setError(asApiError(err)))
       .finally(() => setBusy(false));
-  }, [applyUrl]);
+  }, [applySession, applyUrl]);
 
-  const running = status?.running === true;
+  const changeSession = useCallback((work: () => Promise<SessionInfo>) => {
+    setError(null);
+    void work()
+      .then(applySession)
+      .catch((err: unknown) => setError(asApiError(err)));
+  }, [applySession]);
+
+  const activeWindow = session.windows.find((item) => item.id === session.activeWindowId);
+  const tabs = activeWindow?.tabs ?? [];
+  const canCloseTab = session.windows.reduce((sum, window) => sum + window.tabs.length, 0) > 1;
 
   return (
     <div class="shell">
+      {running && session.windows.length > 0 && (
+        <WindowBar
+          windows={session.windows}
+          onSelect={(id) => changeSession(() => mutateSession({ action: "select-window", windowId: id }))}
+          onNew={() => changeSession(() => mutateSession({ action: "new-window" }))}
+          onClose={(id) => changeSession(() => mutateSession({ action: "close-window", windowId: id }))}
+        />
+      )}
+      {running && session.windows.length > 0 && (
+        <TabBar
+          tabs={tabs}
+          canCloseTab={canCloseTab}
+          onSelect={(id) => changeSession(() => mutateSession({ action: "select-tab", tabId: id }))}
+          onNew={() =>
+            changeSession(() =>
+              mutateSession({ action: "new-tab", windowId: session.activeWindowId || undefined }),
+            )
+          }
+          onClose={(id) => changeSession(() => mutateSession({ action: "close-tab", tabId: id }))}
+        />
+      )}
       <AddressBar
         value={address}
         busy={busy}
@@ -111,8 +201,18 @@ export function App() {
       )}
       {error !== null && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
-      {running ? (
-        <Viewport onIdentity={(next) => applyUrl(next.url)} />
+      {running && session.activeTabId !== "" ? (
+        <Viewport
+          key={session.activeTabId}
+          onIdentity={(next) => {
+            applyUrl(next.url);
+            if (next.tabId !== "" && next.tabId !== session.activeTabId) {
+              void fetchSession().then(applySession).catch(() => {
+                // The next poll retries.
+              });
+            }
+          }}
+        />
       ) : (
         <div class="empty">
           <h1>Welcome to my browser</h1>

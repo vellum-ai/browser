@@ -8,10 +8,11 @@
  * fresh screenshot when the screencast already has a frame.
  */
 
-import { ensurePage, isRunning } from "../src/browser.js";
+import { isRunning } from "../src/browser.js";
 import { waitForFrame } from "../src/frame-wait.js";
 import { handle, ok } from "../src/http.js";
 import { currentViewport, latestFrame, startScreencast } from "../src/screencast.js";
+import { activeTabId, ensurePage } from "../src/session.js";
 
 export interface FrameBody {
   screenshot: string | null;
@@ -20,10 +21,12 @@ export interface FrameBody {
   url: string;
   title: string;
   seq: number;
+  tabId: string;
 }
 
 /** One first-paint screenshot, not one per poll. A poll that screenshots is the old lag. */
 let firstPaintTaken = false;
+let paintedTabId = "";
 let cachedTitle = "";
 let cachedTitleAt = 0;
 let cachedTitleUrl = "";
@@ -32,6 +35,7 @@ export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     if (!isRunning()) {
       firstPaintTaken = false;
+      paintedTabId = "";
       cachedTitle = "";
       cachedTitleUrl = "";
       const empty: FrameBody = {
@@ -41,11 +45,19 @@ export async function GET(request: Request): Promise<Response> {
         url: "",
         title: "",
         seq: 0,
+        tabId: "",
       };
       return ok(empty);
     }
 
     const page = await ensurePage();
+    const tabId = activeTabId();
+    if (tabId !== paintedTabId) {
+      firstPaintTaken = false;
+      paintedTabId = tabId;
+      cachedTitle = "";
+      cachedTitleUrl = "";
+    }
     await startScreencast(page);
 
     const since = sinceOf(request);
@@ -105,6 +117,7 @@ async function bodyOf(
     url: page.url(),
     title: await titleOf(page),
     seq,
+    tabId: activeTabId(),
   };
 }
 

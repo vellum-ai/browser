@@ -4,8 +4,8 @@
  *
  * A CDP screencast dies when the main frame navigates. Restarting it is what
  * makes the next page appear instead of the last JPEG of the previous one.
- * Popups (`target="_blank"`) have nowhere to go in a single-viewport app, so
- * their URL is loaded in the page the user is already looking at.
+ * A popup (`target="_blank"`) becomes a tab in the window that opened it when
+ * the session layer supplies `onPopup`; otherwise its URL is loaded here.
  */
 
 import type { Page } from "playwright";
@@ -36,7 +36,7 @@ export async function restartScreencast(page: Page): Promise<void> {
  *
  * Safe to call on every input: a page already watched is a no-op.
  */
-export function watchPage(page: Page): void {
+export function watchPage(page: Page, options: { onPopup?: (popup: Page) => void } = {}): void {
   if (hooked.has(page)) {
     return;
   }
@@ -49,6 +49,10 @@ export function watchPage(page: Page): void {
   });
 
   page.on("popup", (popup) => {
+    if (options.onPopup !== undefined) {
+      options.onPopup(popup);
+      return;
+    }
     void adoptPopup(page, popup);
   });
 }
