@@ -37,6 +37,7 @@ export interface FrameBody {
   height: number;
   url: string;
   title: string;
+  seq: number;
 }
 
 export type HistoryAction = "back" | "forward" | "reload";
@@ -157,9 +158,9 @@ export function navigate(input: string): Promise<PageIdentity> {
   return post<PageIdentity>("/navigate", { input });
 }
 
-/** The latest live picture of the page. */
-export function fetchFrame(): Promise<FrameBody> {
-  return request<FrameBody>("/frame");
+/** The latest live picture of the page. `since` is the last seq the canvas painted. */
+export function fetchFrame(since = 0): Promise<FrameBody> {
+  return request<FrameBody>(`/frame?since=${since}`);
 }
 
 export interface Caret {

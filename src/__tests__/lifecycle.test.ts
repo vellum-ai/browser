@@ -87,12 +87,15 @@ describe("the app is a live view, not a screenshot picker", () => {
     expect(source("routes/frame.ts")).toContain("currentViewport()");
   });
 
-  test("keeps the last JPEG up while the next one decodes", () => {
+  test("paints frames onto a canvas instead of swapping img src", () => {
     const viewport = source("apps/browser/src/components/Viewport.tsx");
-    expect(viewport).toContain("is-hidden");
-    expect(viewport).toContain("incomingJpeg");
-    expect(source("apps/browser/src/styles.css")).toContain(".capture.is-hidden");
+    expect(viewport).toContain("<canvas");
+    expect(viewport).toContain("drawImage");
+    expect(viewport).toContain("data:image/jpeg;base64,");
+    expect(viewport).toContain("fetchFrame(since.current)");
     expect(source("apps/browser/src/styles.css")).toContain(".caret");
+    expect(source("routes/frame.ts")).toContain("waitForFrame");
+    expect(source("src/frame-wait.ts")).toContain("WAIT_MS");
   });
 
   test("reads the page cursor and follows a link the click did not", () => {

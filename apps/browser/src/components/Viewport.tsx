@@ -7,9 +7,6 @@ interface Props {
   onIdentity(next: { url: string; title: string }): void;
 }
 
-/** Floor between frame requests. The next request starts after the last one lands. */
-const FRAME_MS = 16;
-
 /** Two mouseups inside this window are one double-click. */
 const DBLCLICK_MS = 400;
 
@@ -26,12 +23,14 @@ const DBLCLICK_MS = 400;
  *
  * The JPEG is a bitmap. Page CSS never reaches the user's pointer, so the
  * cursor and the text caret are applied here from a hit-test on the live DOM.
- * A new frame decodes in a hidden buffer and is shown only after it has
- * painted, so replacing `src` on the visible image cannot flash the
- * viewport's background between frames.
+ *
+ * Frames are painted onto a canvas the way a VNC viewer does: decode the JPEG
+ * from a data URL, then `drawImage` over the pixels already there. Replacing
+ * an `<img src>` is what flashes the viewport's background between frames.
  */
 export function Viewport({ onIdentity }: Props) {
   const stage = useRef<HTMLDivElement | null>(null);
+  const canvas = useRef<HTMLCanvasElement | null>(null);
   const size = useRef({ width: 1280, height: 800 });
   const lastSize = useRef({ width: 0, height: 0 });
   const wheel = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0, pending: false });
@@ -40,15 +39,10 @@ export function Viewport({ onIdentity }: Props) {
   const identityRef = useRef({ url: "", title: "" });
   const onIdentityRef = useRef(onIdentity);
   onIdentityRef.current = onIdentity;
-  const frontJpeg = useRef<string | null>(null);
-  const backJpeg = useRef<string | null>(null);
-  const frontOnTop = useRef(true);
-  const incomingJpeg = useRef<string | null>(null);
+  const paintGen = useRef(0);
+  const since = useRef(0);
 
-  const [front, setFront] = useState<string | null>(null);
-  const [back, setBack] = useState<string | null>(null);
-  const [showFront, setShowFront] = useState(true);
-  const [title, setTitle] = useState("Current page");
+  const [hasPicture, setHasPicture] = useState(false);
   const [cursor, setCursor] = useState("default");
   const [caret, setCaret] = useState<Caret | null>(null);
 
@@ -106,52 +100,65 @@ export function Viewport({ onIdentity }: Props) {
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const tick = async () => {
+      let delay = 0;
       try {
-        const next = await fetchFrame();
+        const next = await fetchFrame(since.current);
         if (cancelled) {
           return;
         }
         applyFrame(next);
       } catch {
-        // The next tick retries. A dead browser surfaces through /status.
+        delay = 100;
       } finally {
         if (!cancelled) {
           timer = setTimeout(() => {
             void tick();
-          }, FRAME_MS);
+          }, delay);
         }
       }
+    };
+
+    const paint = (jpeg: string, width: number, height: number) => {
+      const node = canvas.current;
+      if (node === null) {
+        return;
+      }
+      const gen = paintGen.current + 1;
+      paintGen.current = gen;
+      const image = new Image();
+      image.onload = () => {
+        if (gen !== paintGen.current) {
+          return;
+        }
+        if (node.width !== width || node.height !== height) {
+          node.width = width;
+          node.height = height;
+        }
+        const ctx = node.getContext("2d");
+        if (ctx === null) {
+          return;
+        }
+        ctx.drawImage(image, 0, 0, width, height);
+        setHasPicture(true);
+      };
+      image.src = `data:image/jpeg;base64,${jpeg}`;
     };
 
     const applyFrame = (next: FrameBody) => {
       if (next.width > 0 && next.height > 0) {
         size.current = { width: next.width, height: next.height };
       }
+      if (typeof next.seq === "number" && Number.isFinite(next.seq) && next.seq > since.current) {
+        since.current = next.seq;
+      }
       if (next.url !== "" && (next.url !== identityRef.current.url || next.title !== identityRef.current.title)) {
         identityRef.current = { url: next.url, title: next.title };
         onIdentityRef.current(identityRef.current);
       }
-      if (next.title !== "") {
-        setTitle(next.title);
-      }
       if (next.screenshot === null || next.screenshot === "") {
         return;
       }
-      if (
-        next.screenshot === frontJpeg.current ||
-        next.screenshot === backJpeg.current ||
-        next.screenshot === incomingJpeg.current
-      ) {
-        return;
-      }
-      incomingJpeg.current = next.screenshot;
-      if (frontOnTop.current) {
-        backJpeg.current = next.screenshot;
-        setBack(next.screenshot);
-      } else {
-        frontJpeg.current = next.screenshot;
-        setFront(next.screenshot);
-      }
+      paint(next.screenshot, size.current.width, size.current.height);
     };
 
     void tick();
@@ -346,43 +353,12 @@ export function Viewport({ onIdentity }: Props) {
           });
       }}
     >
-      {front === null && back === null ? (
+      {hasPicture ? null : (
         <div class="viewport-fallback">
           <p>Waiting for the page…</p>
         </div>
-      ) : null}
-      {front !== null ? (
-        <img
-          class={showFront ? "capture" : "capture is-hidden"}
-          src={`data:image/jpeg;base64,${front}`}
-          alt={showFront ? (title === "" ? "Current page" : title) : ""}
-          draggable={false}
-          onLoad={() => {
-            if (frontOnTop.current || incomingJpeg.current !== frontJpeg.current) {
-              return;
-            }
-            incomingJpeg.current = null;
-            frontOnTop.current = true;
-            setShowFront(true);
-          }}
-        />
-      ) : null}
-      {back !== null ? (
-        <img
-          class={showFront ? "capture is-hidden" : "capture"}
-          src={`data:image/jpeg;base64,${back}`}
-          alt={showFront ? "" : title === "" ? "Current page" : title}
-          draggable={false}
-          onLoad={() => {
-            if (!frontOnTop.current || incomingJpeg.current !== backJpeg.current) {
-              return;
-            }
-            incomingJpeg.current = null;
-            frontOnTop.current = false;
-            setShowFront(false);
-          }}
-        />
-      ) : null}
+      )}
+      <canvas ref={canvas} class="capture" />
       {caret !== null ? <div class="caret" style={caretStyle(caret)} /> : null}
     </div>
   );
