@@ -53,11 +53,11 @@ entries a single-page app pushed itself, which no remembered list of URLs could
 reproduce.
 
 **The page is live.** Most sites refuse to be iframed (`X-Frame-Options`), and
-the app cannot embed Chromium, so the panel shows a CDP screencast (a stream of
-JPEG frames) and forwards wheel, pointer, and keyboard events to the real page.
-Scrolling happens in Chromium. The next frame shows the result. The Playwright
-viewport is resized to the panel, so the picture fills it instead of showing a
-cropped still with empty space around it.
+the app cannot embed Chromium, so the panel shows a CDP screencast: JPEG frames
+painted onto a canvas, with wheel, pointer, and keyboard events forwarded to
+the real page. Scrolling happens in Chromium. The next frame shows the result.
+The Playwright viewport is resized to the panel, so the picture fills it
+instead of showing a cropped still with empty space around it.
 
 ### Getting a Chromium
 
@@ -120,7 +120,7 @@ URL and no auth and fails.
 | `/status`   | GET    | Whether the browser is up, which Chromium backs it, and why a launch failed. Never launches. |
 | `/start`    | POST   | Open the window, or retry after a failed launch. Called on app load. Answers like `/status`. |
 | `/navigate` | POST   | `{ input }`: raw address-bar value. Returns the page identity (URL, title).      |
-| `/frame`    | GET    | Latest live picture of the page. Polled by the app; does not collect elements.   |
+| `/frame`    | GET    | Latest live picture of the page. `?since=` is the last seq the canvas painted; unchanged polls omit the JPEG. |
 | `/input`    | POST   | `{ type, … }`: wheel, move, down, up, click, key, or resize. Answers immediately. |
 | `/act`      | POST   | `{ action }`: back, forward, or reload.                                          |
 | `/extract`  | GET    | Page text, for the assistant. `?includeLinks=1` appends its links.                |

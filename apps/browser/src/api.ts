@@ -37,6 +37,7 @@ export interface FrameBody {
   height: number;
   url: string;
   title: string;
+  seq: number;
 }
 
 export type HistoryAction = "back" | "forward" | "reload";
@@ -46,7 +47,7 @@ export type PointerButton = "left" | "right" | "middle";
 export type Input =
   | { type: "wheel"; x: number; y: number; deltaX: number; deltaY: number }
   | { type: "move"; x: number; y: number }
-  | { type: "down"; x: number; y: number; button?: PointerButton }
+  | { type: "down"; x: number; y: number; button?: PointerButton; count?: number }
   | { type: "up"; x: number; y: number; button?: PointerButton }
   | { type: "click"; x: number; y: number; button?: PointerButton; count?: number }
   | { type: "key"; key: string }
@@ -157,15 +158,24 @@ export function navigate(input: string): Promise<PageIdentity> {
   return post<PageIdentity>("/navigate", { input });
 }
 
-/** The latest live picture of the page. */
-export function fetchFrame(): Promise<FrameBody> {
-  return request<FrameBody>("/frame");
+/** The latest live picture of the page. `since` is the last seq the canvas painted. */
+export function fetchFrame(since = 0): Promise<FrameBody> {
+  return request<FrameBody>(`/frame?since=${since}`);
+}
+
+export interface Caret {
+  x: number;
+  y: number;
+  height: number;
 }
 
 export interface InputResult {
   ok: true;
   width: number;
   height: number;
+  cursor?: string;
+  caret?: Caret | null;
+  href?: string | null;
 }
 
 /**

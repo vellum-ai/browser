@@ -1,13 +1,15 @@
 /**
  * `GET /x/plugins/browser/frame`: the latest live picture of the page.
  *
- * The app polls this while the browser is up. It never launches, never
- * collects elements, and never takes a fresh screenshot when the screencast
- * already has a frame: those are what made scrolling feel like paging through
- * stills.
+ * The app long-polls this while the browser is up. A `?since=` of the last
+ * sequence the canvas painted means this route can sit until Chromium
+ * composites a new JPEG, and answer without a screenshot when nothing has
+ * changed. It never launches, never collects elements, and never takes a
+ * fresh screenshot when the screencast already has a frame.
  */
 
 import { ensurePage, isRunning } from "../src/browser.js";
+import { waitForFrame } from "../src/frame-wait.js";
 import { handle, ok } from "../src/http.js";
 import { currentViewport, latestFrame, startScreencast } from "../src/screencast.js";
 
@@ -17,6 +19,7 @@ export interface FrameBody {
   height: number;
   url: string;
   title: string;
+  seq: number;
 }
 
 /** One first-paint screenshot, not one per poll. A poll that screenshots is the old lag. */
@@ -25,7 +28,7 @@ let cachedTitle = "";
 let cachedTitleAt = 0;
 let cachedTitleUrl = "";
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   return handle(async () => {
     if (!isRunning()) {
       firstPaintTaken = false;
@@ -37,6 +40,7 @@ export async function GET(): Promise<Response> {
         height: currentViewport().height,
         url: "",
         title: "",
+        seq: 0,
       };
       return ok(empty);
     }
@@ -44,13 +48,19 @@ export async function GET(): Promise<Response> {
     const page = await ensurePage();
     await startScreencast(page);
 
-    const frame = latestFrame();
+    const since = sinceOf(request);
+    const frame = await waitForFrame(since);
     const size = currentViewport();
-    if (frame !== null) {
+
+    if (frame !== null && frame.seq > since) {
       // Width/height are the Playwright viewport, not the JPEG or CDP
       // deviceWidth. Clicks are dispatched in that space; a stale 1280x800
       // frame size on a 400px panel is how most clicks missed the page.
-      return ok(await bodyOf(page, frame.jpeg, size.width, size.height));
+      return ok(await bodyOf(page, frame.jpeg, size.width, size.height, frame.seq));
+    }
+
+    if (frame !== null) {
+      return ok(await bodyOf(page, null, size.width, size.height, frame.seq));
     }
 
     // First paint only: the stream has not produced a frame yet. Later empty
@@ -59,14 +69,26 @@ export async function GET(): Promise<Response> {
       firstPaintTaken = true;
       try {
         const buffer = await page.screenshot({ type: "jpeg", quality: 55 });
-        return ok(await bodyOf(page, buffer.toString("base64"), size.width, size.height));
+        return ok(await bodyOf(page, buffer.toString("base64"), size.width, size.height, 0));
       } catch {
         // Fall through to an empty frame; the next poll retries the stream.
       }
     }
 
-    return ok(await bodyOf(page, null, size.width, size.height));
+    return ok(await bodyOf(page, null, size.width, size.height, latestFrame()?.seq ?? 0));
   });
+}
+
+function sinceOf(request: Request): number {
+  const raw = new URL(request.url).searchParams.get("since");
+  if (raw === null || raw === "") {
+    return 0;
+  }
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value < 0) {
+    return 0;
+  }
+  return value;
 }
 
 async function bodyOf(
@@ -74,6 +96,7 @@ async function bodyOf(
   screenshot: string | null,
   width: number,
   height: number,
+  seq: number,
 ): Promise<FrameBody> {
   return {
     screenshot,
@@ -81,6 +104,7 @@ async function bodyOf(
     height,
     url: page.url(),
     title: await titleOf(page),
+    seq,
   };
 }
 

@@ -16,12 +16,15 @@ export interface Frame {
   jpeg: string;
   width: number;
   height: number;
+  /** Monotonic id. The app uses it to skip a JPEG it has already painted. */
+  seq: number;
 }
 
 let session: CDPSession | null = null;
 let attached: Page | null = null;
 let latest: Frame | null = null;
 let attaching: Promise<void> | null = null;
+let seq = 0;
 let viewport: { width: number; height: number } = {
   width: DEFAULT_VIEWPORT.width,
   height: DEFAULT_VIEWPORT.height,
@@ -64,10 +67,12 @@ async function attach(page: Page): Promise<void> {
   await stopScreencast({ keepFrame: true });
   const next = await page.context().newCDPSession(page);
   next.on("Page.screencastFrame", (event: ScreencastEvent) => {
+    seq += 1;
     latest = {
       jpeg: event.data,
       width: event.metadata?.deviceWidth ?? viewport.width,
       height: event.metadata?.deviceHeight ?? viewport.height,
+      seq,
     };
     void next.send("Page.screencastFrameAck", { sessionId: event.sessionId }).catch(() => {
       // The session ended between the frame and the ack.

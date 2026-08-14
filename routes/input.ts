@@ -7,6 +7,7 @@
  */
 
 import { BrowserError, ensurePage } from "../src/browser.js";
+import { hitTest } from "../src/hit.js";
 import {
   handle,
   ok,
@@ -17,6 +18,7 @@ import {
 } from "../src/http.js";
 import { exclusive } from "../src/lock.js";
 import { currentViewport, resizeViewport } from "../src/screencast.js";
+import { followHref, watchPage } from "../src/watch.js";
 
 const BUTTONS = new Set(["left", "right", "middle"]);
 
@@ -29,43 +31,62 @@ export async function POST(request: Request): Promise<Response> {
 
     return exclusive(async () => {
       const page = await ensurePage();
+      watchPage(page);
 
       switch (type) {
         case "wheel": {
           const at = pointOf(body);
           await page.mouse.move(at.x, at.y);
           await page.mouse.wheel(requireNumber(body, "deltaX"), requireNumber(body, "deltaY"));
-          break;
+          return ok(await reply(page, at, { caret: false }));
         }
         case "move": {
           const at = pointOf(body);
           await page.mouse.move(at.x, at.y);
-          break;
+          return ok(await reply(page, at, { caret: false }));
         }
         case "down": {
           const at = pointOf(body);
+          const count = optionalNumber(body, "count");
           await page.mouse.move(at.x, at.y);
-          await page.mouse.down({ button: buttonOf(body) });
-          break;
+          await page.mouse.down({
+            button: buttonOf(body),
+            ...(count === undefined ? {} : { clickCount: count }),
+          });
+          return ok(await reply(page, at, { caret: true }));
         }
         case "up": {
           const at = pointOf(body);
+          const count = optionalNumber(body, "count");
+          const beforeUrl = page.url();
           await page.mouse.move(at.x, at.y);
-          await page.mouse.up({ button: buttonOf(body) });
-          break;
+          await page.mouse.up({
+            button: buttonOf(body),
+            ...(count === undefined ? {} : { clickCount: count }),
+          });
+          const hit = await hitTest(page, at.x, at.y, { caret: true });
+          await followHref(page, hit.href, beforeUrl);
+          return ok({ ok: true as const, ...currentViewport(), ...hit });
         }
         case "click": {
           const at = pointOf(body);
           const count = optionalNumber(body, "count");
+          const beforeUrl = page.url();
           await page.mouse.click(at.x, at.y, {
             button: buttonOf(body),
             ...(count === undefined ? {} : { clickCount: count }),
           });
-          break;
+          const hit = await hitTest(page, at.x, at.y, { caret: true });
+          await followHref(page, hit.href, beforeUrl);
+          return ok({ ok: true as const, ...currentViewport(), ...hit });
         }
         case "key": {
           await page.keyboard.press(requireString(body, "key"));
-          break;
+          const { width, height } = currentViewport();
+          const hit = await hitTest(page, Math.floor(width / 2), Math.floor(height / 2), {
+            caret: true,
+          });
+          return ok({ ok: true as const, width, height, ...hit });
         }
         case "resize": {
           const applied = await resizeViewport(
@@ -82,8 +103,6 @@ export async function POST(request: Request): Promise<Response> {
           );
         }
       }
-
-      return ok({ ok: true as const, ...currentViewport() });
     });
   });
 }
@@ -118,4 +137,20 @@ function buttonOf(body: Record<string, unknown>): MouseButton {
     throw new BrowserError("`button` must be left, right, or middle.", { status: 400 });
   }
   return value as MouseButton;
+}
+
+async function reply(
+  page: import("playwright").Page,
+  at: { x: number; y: number },
+  options: { caret: boolean },
+): Promise<{
+  ok: true;
+  width: number;
+  height: number;
+  cursor: string;
+  caret: { x: number; y: number; height: number } | null;
+  href: string | null;
+}> {
+  const hit = await hitTest(page, at.x, at.y, options);
+  return { ok: true as const, ...currentViewport(), ...hit };
 }
