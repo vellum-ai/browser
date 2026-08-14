@@ -158,9 +158,22 @@ export function navigate(input: string): Promise<PageIdentity> {
   return post<PageIdentity>("/navigate", { input });
 }
 
+let paintedSeq = 0;
+
+function notePaintedSeq(seq: number): void {
+  if (seq > paintedSeq) {
+    paintedSeq = seq;
+  }
+}
+
 /** The latest live picture of the page. `since` is the last seq the canvas painted. */
-export function fetchFrame(since = 0): Promise<FrameBody> {
-  return request<FrameBody>(`/frame?since=${since}`);
+export function fetchFrame(since = paintedSeq): Promise<FrameBody> {
+  return request<FrameBody>(`/frame?since=${since}`).then((body) => {
+    if (typeof body.seq === "number") {
+      notePaintedSeq(body.seq);
+    }
+    return body;
+  });
 }
 
 export interface Caret {
@@ -176,23 +189,103 @@ export interface InputResult {
   cursor?: string;
   caret?: Caret | null;
   href?: string | null;
+  screenshot?: string | null;
+  seq?: number;
+  url?: string;
+  title?: string;
 }
 
 /**
- * Pointer, wheel, keyboard, or a panel resize. Does not wait for a new picture.
+ * Pointer, wheel, keyboard, or a panel resize.
  *
- * Calls run one at a time. A `down` and an `up` that overlap never become a
- * click, which is how taps on the page were disappearing.
+ * Moves and wheels queue and flush as one POST. A down, up, key, or resize
+ * flushes immediately, including anything already queued, so a click is never
+ * stuck behind a trail of moves. The host bridge is one HTTP request per
+ * `postMessage`, which is why a mouse tick must not be its own round trip.
  */
-let inputChain: Promise<unknown> = Promise.resolve();
+let queue: Input[] = [];
+let waiters: Array<{
+  resolve: (result: InputResult) => void;
+  reject: (error: unknown) => void;
+}> = [];
+let running = false;
+let scheduled = false;
+
+function compact(events: Input[]): Input[] {
+  const out: Input[] = [];
+  for (const event of events) {
+    const last = out[out.length - 1];
+    if (event.type === "move" && last?.type === "move") {
+      out[out.length - 1] = event;
+      continue;
+    }
+    if (event.type === "wheel" && last?.type === "wheel") {
+      out[out.length - 1] = {
+        type: "wheel",
+        x: event.x,
+        y: event.y,
+        deltaX: last.deltaX + event.deltaX,
+        deltaY: last.deltaY + event.deltaY,
+      };
+      continue;
+    }
+    out.push(event);
+  }
+  return out;
+}
+
+function isUrgent(input: Input): boolean {
+  return input.type !== "move" && input.type !== "wheel";
+}
+
+async function pump(): Promise<void> {
+  scheduled = false;
+  if (running) {
+    return;
+  }
+  running = true;
+  while (queue.length > 0) {
+    const events = compact(queue);
+    const batch = waiters;
+    queue = [];
+    waiters = [];
+    try {
+      const result = await post<InputResult>("/input", { events, since: paintedSeq });
+      if (typeof result.seq === "number") {
+        notePaintedSeq(result.seq);
+      }
+      for (const waiter of batch) {
+        waiter.resolve(result);
+      }
+    } catch (error) {
+      for (const waiter of batch) {
+        waiter.reject(error);
+      }
+    }
+  }
+  running = false;
+  if (queue.length > 0) {
+    void pump();
+  }
+}
 
 export function sendInput(input: Input): Promise<InputResult> {
-  const next = inputChain.then(() => post<InputResult>("/input", input));
-  inputChain = next.then(
-    () => undefined,
-    () => undefined,
-  );
-  return next;
+  const pending = new Promise<InputResult>((resolve, reject) => {
+    waiters.push({ resolve, reject });
+  });
+  queue.push(input);
+  if (isUrgent(input)) {
+    void pump();
+    return pending;
+  }
+  if (!scheduled && !running) {
+    scheduled = true;
+    requestAnimationFrame(() => {
+      scheduled = false;
+      void pump();
+    });
+  }
+  return pending;
 }
 
 /** Back, forward, or reload. */

@@ -1,9 +1,12 @@
 /**
  * `POST /x/plugins/browser/input`: pointer, wheel, keyboard, and resize.
  *
- * These are the events that have to feel instant. The route does the thing and
- * answers immediately. It does not collect elements and it does not take a
- * screenshot: the live frame stream is what the app draws next.
+ * One request can carry a batch of events. The app coalesces moves and wheels
+ * into a single POST per animation frame so each mouse tick is not its own
+ * HTTP round trip through the host bridge.
+ *
+ * The route does the thing and answers immediately. Link following runs after
+ * the response is sent, so a click cannot hold the input lock for a navigation.
  */
 
 import { BrowserError, ensurePage } from "../src/browser.js";
@@ -17,7 +20,7 @@ import {
   requireString,
 } from "../src/http.js";
 import { exclusive } from "../src/lock.js";
-import { currentViewport, resizeViewport } from "../src/screencast.js";
+import { currentViewport, latestFrame, resizeViewport } from "../src/screencast.js";
 import { followHref, watchPage } from "../src/watch.js";
 
 const BUTTONS = new Set(["left", "right", "middle"]);
@@ -27,84 +30,132 @@ type MouseButton = "left" | "right" | "middle";
 export async function POST(request: Request): Promise<Response> {
   return handle(async () => {
     const body = await readJson(request);
-    const type = requireString(body, "type");
+    const events = eventsOf(body);
+    const since = optionalNumber(body, "since") ?? 0;
 
     return exclusive(async () => {
       const page = await ensurePage();
       watchPage(page);
 
-      switch (type) {
-        case "wheel": {
-          const at = pointOf(body);
-          await page.mouse.move(at.x, at.y);
-          await page.mouse.wheel(requireNumber(body, "deltaX"), requireNumber(body, "deltaY"));
-          return ok(await reply(page, at, { caret: false }));
-        }
-        case "move": {
-          const at = pointOf(body);
-          await page.mouse.move(at.x, at.y);
-          return ok(await reply(page, at, { caret: false }));
-        }
-        case "down": {
-          const at = pointOf(body);
-          const count = optionalNumber(body, "count");
-          await page.mouse.move(at.x, at.y);
-          await page.mouse.down({
-            button: buttonOf(body),
-            ...(count === undefined ? {} : { clickCount: count }),
-          });
-          return ok(await reply(page, at, { caret: true }));
-        }
-        case "up": {
-          const at = pointOf(body);
-          const count = optionalNumber(body, "count");
-          const beforeUrl = page.url();
-          await page.mouse.move(at.x, at.y);
-          await page.mouse.up({
-            button: buttonOf(body),
-            ...(count === undefined ? {} : { clickCount: count }),
-          });
-          const hit = await hitTest(page, at.x, at.y, { caret: true });
-          await followHref(page, hit.href, beforeUrl);
-          return ok({ ok: true as const, ...currentViewport(), ...hit });
-        }
-        case "click": {
-          const at = pointOf(body);
-          const count = optionalNumber(body, "count");
-          const beforeUrl = page.url();
-          await page.mouse.click(at.x, at.y, {
-            button: buttonOf(body),
-            ...(count === undefined ? {} : { clickCount: count }),
-          });
-          const hit = await hitTest(page, at.x, at.y, { caret: true });
-          await followHref(page, hit.href, beforeUrl);
-          return ok({ ok: true as const, ...currentViewport(), ...hit });
-        }
-        case "key": {
-          await page.keyboard.press(requireString(body, "key"));
-          const { width, height } = currentViewport();
-          const hit = await hitTest(page, Math.floor(width / 2), Math.floor(height / 2), {
-            caret: true,
-          });
-          return ok({ ok: true as const, width, height, ...hit });
-        }
-        case "resize": {
-          const applied = await resizeViewport(
-            page,
-            requireNumber(body, "width"),
-            requireNumber(body, "height"),
-          );
-          return ok({ ok: true as const, ...applied });
-        }
-        default: {
-          throw new BrowserError(
-            `Unsupported input \`${type}\`. Expected wheel, move, down, up, click, key, or resize.`,
-            { status: 400 },
-          );
+      let lastPoint: { x: number; y: number } | null = null;
+      let wantCaret = false;
+      let follow: { beforeUrl: string } | null = null;
+
+      for (const event of events) {
+        const type = requireString(event, "type");
+        switch (type) {
+          case "wheel": {
+            const at = pointOf(event);
+            lastPoint = at;
+            await page.mouse.move(at.x, at.y);
+            await page.mouse.wheel(requireNumber(event, "deltaX"), requireNumber(event, "deltaY"));
+            break;
+          }
+          case "move": {
+            const at = pointOf(event);
+            lastPoint = at;
+            await page.mouse.move(at.x, at.y);
+            break;
+          }
+          case "down": {
+            const at = pointOf(event);
+            lastPoint = at;
+            wantCaret = true;
+            const count = optionalNumber(event, "count");
+            await page.mouse.move(at.x, at.y);
+            await page.mouse.down({
+              button: buttonOf(event),
+              ...(count === undefined ? {} : { clickCount: count }),
+            });
+            break;
+          }
+          case "up": {
+            const at = pointOf(event);
+            lastPoint = at;
+            wantCaret = true;
+            const count = optionalNumber(event, "count");
+            const beforeUrl = page.url();
+            await page.mouse.move(at.x, at.y);
+            await page.mouse.up({
+              button: buttonOf(event),
+              ...(count === undefined ? {} : { clickCount: count }),
+            });
+            follow = { beforeUrl };
+            break;
+          }
+          case "click": {
+            const at = pointOf(event);
+            lastPoint = at;
+            wantCaret = true;
+            const count = optionalNumber(event, "count");
+            const beforeUrl = page.url();
+            await page.mouse.click(at.x, at.y, {
+              button: buttonOf(event),
+              ...(count === undefined ? {} : { clickCount: count }),
+            });
+            follow = { beforeUrl };
+            break;
+          }
+          case "key": {
+            wantCaret = true;
+            await page.keyboard.press(requireString(event, "key"));
+            break;
+          }
+          case "resize": {
+            await resizeViewport(page, requireNumber(event, "width"), requireNumber(event, "height"));
+            break;
+          }
+          default: {
+            throw new BrowserError(
+              `Unsupported input \`${type}\`. Expected wheel, move, down, up, click, key, or resize.`,
+              { status: 400 },
+            );
+          }
         }
       }
+
+      if (lastPoint === null && wantCaret) {
+        const size = currentViewport();
+        lastPoint = { x: Math.floor(size.width / 2), y: Math.floor(size.height / 2) };
+      }
+      const at = lastPoint ?? { x: 0, y: 0 };
+      const hit =
+        lastPoint === null
+          ? { cursor: "default" as const, caret: null, href: null }
+          : await hitTest(page, at.x, at.y, { caret: wantCaret });
+      if (follow !== null) {
+        void followHref(page, hit.href, follow.beforeUrl);
+      }
+
+      const frame = latestFrame();
+      const screenshot = frame !== null && frame.seq > since ? frame.jpeg : null;
+      const seq = frame?.seq ?? since;
+
+      return ok({
+        ok: true as const,
+        ...currentViewport(),
+        ...hit,
+        screenshot,
+        seq,
+        url: page.url(),
+      });
     });
   });
+}
+
+function eventsOf(body: Record<string, unknown>): Record<string, unknown>[] {
+  if (Array.isArray(body.events)) {
+    if (body.events.length === 0) {
+      throw new BrowserError("`events` must not be empty.", { status: 400 });
+    }
+    return body.events.map((event, index) => {
+      if (typeof event !== "object" || event === null || Array.isArray(event)) {
+        throw new BrowserError(`\`events[${index}]\` must be an object.`, { status: 400 });
+      }
+      return event as Record<string, unknown>;
+    });
+  }
+  return [body];
 }
 
 /**
@@ -137,20 +188,4 @@ function buttonOf(body: Record<string, unknown>): MouseButton {
     throw new BrowserError("`button` must be left, right, or middle.", { status: 400 });
   }
   return value as MouseButton;
-}
-
-async function reply(
-  page: import("playwright").Page,
-  at: { x: number; y: number },
-  options: { caret: boolean },
-): Promise<{
-  ok: true;
-  width: number;
-  height: number;
-  cursor: string;
-  caret: { x: number; y: number; height: number } | null;
-  href: string | null;
-}> {
-  const hit = await hitTest(page, at.x, at.y, options);
-  return { ok: true as const, ...currentViewport(), ...hit };
 }

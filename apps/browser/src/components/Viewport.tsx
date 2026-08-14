@@ -56,6 +56,46 @@ export function Viewport({ onIdentity }: Props) {
     if (result.caret !== undefined) {
       setCaret(result.caret);
     }
+    if (typeof result.seq === "number" && result.seq > since.current) {
+      since.current = result.seq;
+    }
+    if (typeof result.url === "string" && result.url !== "" && result.url !== identityRef.current.url) {
+      identityRef.current = { url: result.url, title: identityRef.current.title };
+      onIdentityRef.current(identityRef.current);
+    }
+    if (typeof result.screenshot === "string" && result.screenshot !== "") {
+      paint(
+        result.screenshot,
+        size.current.width,
+        size.current.height,
+      );
+    }
+  };
+
+  const paint = (jpeg: string, width: number, height: number) => {
+    const node = canvas.current;
+    if (node === null) {
+      return;
+    }
+    const gen = paintGen.current + 1;
+    paintGen.current = gen;
+    const image = new Image();
+    image.onload = () => {
+      if (gen !== paintGen.current) {
+        return;
+      }
+      if (node.width !== width || node.height !== height) {
+        node.width = width;
+        node.height = height;
+      }
+      const ctx = node.getContext("2d");
+      if (ctx === null) {
+        return;
+      }
+      ctx.drawImage(image, 0, 0, width, height);
+      setHasPicture(true);
+    };
+    image.src = `data:image/jpeg;base64,${jpeg}`;
   };
 
   useEffect(() => {
@@ -116,32 +156,6 @@ export function Viewport({ onIdentity }: Props) {
           }, delay);
         }
       }
-    };
-
-    const paint = (jpeg: string, width: number, height: number) => {
-      const node = canvas.current;
-      if (node === null) {
-        return;
-      }
-      const gen = paintGen.current + 1;
-      paintGen.current = gen;
-      const image = new Image();
-      image.onload = () => {
-        if (gen !== paintGen.current) {
-          return;
-        }
-        if (node.width !== width || node.height !== height) {
-          node.width = width;
-          node.height = height;
-        }
-        const ctx = node.getContext("2d");
-        if (ctx === null) {
-          return;
-        }
-        ctx.drawImage(image, 0, 0, width, height);
-        setHasPicture(true);
-      };
-      image.src = `data:image/jpeg;base64,${jpeg}`;
     };
 
     const applyFrame = (next: FrameBody) => {
