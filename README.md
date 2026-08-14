@@ -101,6 +101,9 @@ does not need an assistant restart to recover.
   the reason and a Start / Retry button.
 - **The page**: a live view of Chromium. Scroll, click, and type on it. The
   panel does not scroll a screenshot; wheel and pointer events go to the page.
+- **Tabs and windows**: add and close both. There is always at least one
+  window and at least one tab. A `target="_blank"` popup becomes a tab in the
+  window that opened it.
 - **Back / forward / reload**: the page's real history.
 
 ## Configuration
@@ -123,6 +126,8 @@ URL and no auth and fails.
 | `/frame`    | GET    | Latest live picture of the page. `?since=` is the last seq the canvas painted; unchanged polls omit the JPEG. |
 | `/input`    | POST   | `{ events, since? }` (or a single event): wheel, move, down, up, click, key, or resize. Answers immediately; a newer JPEG is piggybacked when `since` is behind. |
 | `/act`      | POST   | `{ action }`: back, forward, or reload.                                          |
+| `/session`  | GET    | Windows and tabs. Empty when the browser is not running.                         |
+| `/session`  | POST   | `{ action }`: new-tab, close-tab, select-tab, new-window, close-window, select-window. At least one window and one tab remain. |
 | `/extract`  | GET    | Page text, for the assistant. `?includeLinks=1` appends its links.                |
 | `/close`    | POST   | Shut the browser down. The profile is kept.                                      |
 
@@ -185,8 +190,6 @@ and served on the next open. `dist/` is generated — never commit it.
 
 ## Not in this version
 
-- **Tabs.** One page, reused. Pages a site opens itself (`target="_blank"`, a
-  popup) are left alone rather than surfaced.
 - **A model-visible tool.** The assistant cannot yet open this app or hand it a
   URL from a conversation.
 - **A marketplace listing.** Install from the repo URL until an entry lands in

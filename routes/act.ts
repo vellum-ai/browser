@@ -5,8 +5,9 @@
  * `/input` so those can stay fast; this route is the slower, explicit chrome.
  */
 
-import { BrowserError, ensurePage } from "../src/browser.js";
+import { BrowserError } from "../src/browser.js";
 import { handle, ok, readJson, requireString } from "../src/http.js";
+import { ensurePage } from "../src/session.js";
 import { pageIdentity } from "../src/view.js";
 import type { PageIdentity } from "../src/view.js";
 

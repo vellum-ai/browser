@@ -16,6 +16,7 @@
 
 import { ensureContext } from "../src/browser.js";
 import { handle, ok } from "../src/http.js";
+import { ensureSession } from "../src/session.js";
 import { buildStatus } from "../src/status.js";
 import type { StatusBody } from "../src/status.js";
 
@@ -23,6 +24,7 @@ export async function POST(): Promise<Response> {
   return handle(async () => {
     try {
       await ensureContext();
+      await ensureSession();
     } catch {
       // The reason is recorded on the module and comes back in the status body
       // below, which is the one place the app reads it from.

@@ -9,7 +9,7 @@
  * the response is sent, so a click cannot hold the input lock for a navigation.
  */
 
-import { BrowserError, ensurePage } from "../src/browser.js";
+import { BrowserError } from "../src/browser.js";
 import { hitTest } from "../src/hit.js";
 import {
   handle,
@@ -21,6 +21,7 @@ import {
 } from "../src/http.js";
 import { exclusive } from "../src/lock.js";
 import { currentViewport, latestFrame, resizeViewport } from "../src/screencast.js";
+import { ensurePage } from "../src/session.js";
 import { followHref, watchPage } from "../src/watch.js";
 
 const BUTTONS = new Set(["left", "right", "middle"]);

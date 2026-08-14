@@ -7,7 +7,7 @@
  * what the panel draws.
  */
 
-import { ensurePage } from "../src/browser.js";
+import { ensurePage } from "../src/session.js";
 import { handle, ok, readJson, requireString } from "../src/http.js";
 import { resolveTarget } from "../src/url.js";
 import { pageIdentity } from "../src/view.js";

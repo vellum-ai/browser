@@ -4,7 +4,7 @@ import { fetchFrame, sendInput } from "../api";
 import type { Caret, FrameBody, InputResult, PointerButton } from "../api";
 
 interface Props {
-  onIdentity(next: { url: string; title: string }): void;
+  onIdentity(next: { url: string; title: string; tabId: string }): void;
 }
 
 /** Two mouseups inside this window are one double-click. */
@@ -36,7 +36,7 @@ export function Viewport({ onIdentity }: Props) {
   const wheel = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0, pending: false });
   const move = useRef({ x: 0, y: 0, pending: false });
   const lastClickAt = useRef(0);
-  const identityRef = useRef({ url: "", title: "" });
+  const identityRef = useRef({ url: "", title: "", tabId: "" });
   const onIdentityRef = useRef(onIdentity);
   onIdentityRef.current = onIdentity;
   const paintGen = useRef(0);
@@ -60,7 +60,7 @@ export function Viewport({ onIdentity }: Props) {
       since.current = result.seq;
     }
     if (typeof result.url === "string" && result.url !== "" && result.url !== identityRef.current.url) {
-      identityRef.current = { url: result.url, title: identityRef.current.title };
+      identityRef.current = { ...identityRef.current, url: result.url };
       onIdentityRef.current(identityRef.current);
     }
     if (typeof result.screenshot === "string" && result.screenshot !== "") {
@@ -165,8 +165,13 @@ export function Viewport({ onIdentity }: Props) {
       if (typeof next.seq === "number" && Number.isFinite(next.seq) && next.seq > since.current) {
         since.current = next.seq;
       }
-      if (next.url !== "" && (next.url !== identityRef.current.url || next.title !== identityRef.current.title)) {
-        identityRef.current = { url: next.url, title: next.title };
+      if (
+        next.url !== "" &&
+        (next.url !== identityRef.current.url ||
+          next.title !== identityRef.current.title ||
+          next.tabId !== identityRef.current.tabId)
+      ) {
+        identityRef.current = { url: next.url, title: next.title, tabId: next.tabId };
         onIdentityRef.current(identityRef.current);
       }
       if (next.screenshot === null || next.screenshot === "") {
