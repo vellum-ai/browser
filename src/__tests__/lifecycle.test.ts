@@ -79,7 +79,8 @@ describe("the app is a live view, not a screenshot picker", () => {
     expect(viewport).toContain('type: "up"');
     expect(viewport).toContain("size.current.width");
     expect(viewport).not.toContain("frameRef");
-    expect(source("apps/browser/src/api.ts")).toContain("inputChain");
+    expect(source("apps/browser/src/api.ts")).toContain("events");
+    expect(source("apps/browser/src/api.ts")).toContain("compact");
     expect(source("routes/input.ts")).toContain("exclusive");
     expect(source("routes/input.ts")).not.toMatch(
       /import\s*\{[^}]*requireNumber[^}]*\}\s*from\s*["'].*http/,
@@ -103,8 +104,14 @@ describe("the app is a live view, not a screenshot picker", () => {
     expect(source("src/hit.ts")).toContain("normalizeCursor");
     expect(source("src/watch.ts")).toContain("framenavigated");
     expect(source("src/watch.ts")).toContain("followHref");
-    expect(source("routes/input.ts")).toContain("followHref");
+    expect(source("routes/input.ts")).toContain("void followHref");
+    expect(source("src/watch.ts")).not.toContain("waitForURL");
     expect(source("apps/browser/src/components/Viewport.tsx")).toContain("style={{ cursor }}");
+  });
+
+  test("batches pointer events onto one POST instead of one request per move", () => {
+    expect(source("apps/browser/src/api.ts")).toContain("{ events, since: paintedSeq }");
+    expect(source("routes/input.ts")).toContain("eventsOf");
   });
 });
 

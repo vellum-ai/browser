@@ -121,7 +121,7 @@ URL and no auth and fails.
 | `/start`    | POST   | Open the window, or retry after a failed launch. Called on app load. Answers like `/status`. |
 | `/navigate` | POST   | `{ input }`: raw address-bar value. Returns the page identity (URL, title).      |
 | `/frame`    | GET    | Latest live picture of the page. `?since=` is the last seq the canvas painted; unchanged polls omit the JPEG. |
-| `/input`    | POST   | `{ type, … }`: wheel, move, down, up, click, key, or resize. Answers immediately. |
+| `/input`    | POST   | `{ events, since? }` (or a single event): wheel, move, down, up, click, key, or resize. Answers immediately; a newer JPEG is piggybacked when `since` is behind. |
 | `/act`      | POST   | `{ action }`: back, forward, or reload.                                          |
 | `/extract`  | GET    | Page text, for the assistant. `?includeLinks=1` appends its links.                |
 | `/close`    | POST   | Shut the browser down. The profile is kept.                                      |

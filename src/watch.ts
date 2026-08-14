@@ -64,7 +64,10 @@ export async function followHref(page: Page, href: string | null, beforeUrl: str
   if (href === null || !isSafeHref(href)) {
     return;
   }
-  if (await navigatedFrom(page, beforeUrl, 800)) {
+  if (page.url() !== beforeUrl) {
+    return;
+  }
+  if (!isDifferentDocument(href, beforeUrl)) {
     return;
   }
 
@@ -79,29 +82,14 @@ export async function followHref(page: Page, href: string | null, beforeUrl: str
   } catch {
     // The document may already be unloading.
   }
-  if (await navigatedFrom(page, beforeUrl, 800)) {
-    return;
-  }
-  if (!isDifferentDocument(href, beforeUrl)) {
+  if (page.url() !== beforeUrl) {
     return;
   }
 
   try {
-    await page.goto(href, { waitUntil: "domcontentloaded", timeout: 30_000 });
+    await page.goto(href, { waitUntil: "commit", timeout: 30_000 });
   } catch {
     // The page may have started navigating on its own.
-  }
-}
-
-async function navigatedFrom(page: Page, beforeUrl: string, timeoutMs: number): Promise<boolean> {
-  if (page.url() !== beforeUrl) {
-    return true;
-  }
-  try {
-    await page.waitForURL((url) => url.toString() !== beforeUrl, { timeout: timeoutMs });
-    return true;
-  } catch {
-    return page.url() !== beforeUrl;
   }
 }
 
