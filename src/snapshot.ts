@@ -20,7 +20,7 @@
 
 import type { Page } from "playwright";
 
-import { BrowserError } from "./browser.js";
+import { BrowserError } from "./errors.js";
 
 /** The attribute the collector stamps on every element it reports. */
 const EID_ATTRIBUTE = "data-vellum-eid";

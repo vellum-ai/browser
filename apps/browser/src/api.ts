@@ -21,6 +21,8 @@ export interface StatusBody {
   running: boolean;
   starting: boolean;
   source: BrowserSource;
+  engine: "chromium" | "lightpanda";
+  liveView: boolean;
   /** Why the last launch failed, when one did. Drives the retry state. */
   error: { message: string; hint: string | null } | null;
 }
@@ -70,6 +72,27 @@ export type SessionAction =
   | { action: "select-window"; windowId: string };
 
 export type HistoryAction = "back" | "forward" | "reload";
+
+export type EngineId = "chromium" | "lightpanda";
+
+export interface EngineInfo {
+  id: EngineId;
+  label: string;
+  installed: boolean;
+  installing: boolean;
+  available: boolean;
+  isDefault: boolean;
+  liveView: boolean;
+  note: string | null;
+}
+
+export interface EnginesBody {
+  engines: EngineInfo[];
+  defaultEngine: EngineId;
+  status: StatusBody;
+}
+
+export type EngineAction = "install" | "uninstall" | "set-default";
 
 export type PointerButton = "left" | "right" | "middle";
 
@@ -330,5 +353,15 @@ export function fetchSession(): Promise<SessionInfo> {
 /** Add, close, or select a tab or window. */
 export function mutateSession(body: SessionAction): Promise<SessionInfo> {
   return post<SessionInfo>("/session", body);
+}
+
+/** Installed engines and which one `POST /start` launches. */
+export function fetchEngines(): Promise<EnginesBody> {
+  return request<EnginesBody>("/engines");
+}
+
+/** Install, uninstall, or set the default engine. */
+export function mutateEngine(engine: EngineId, action: EngineAction): Promise<EnginesBody> {
+  return post<EnginesBody>("/engines", { engine, action });
 }
 

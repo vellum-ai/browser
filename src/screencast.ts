@@ -9,6 +9,8 @@
 
 import type { CDPSession, Page } from "playwright";
 
+import { engineHasLiveView, readEngine } from "./engine-config.js";
+
 /** Size used until the app reports the panel's own dimensions. */
 export const DEFAULT_VIEWPORT = { width: 1280, height: 800 } as const;
 
@@ -48,6 +50,9 @@ export function currentViewport(): { width: number; height: number } {
  * missing stream falls back to a one-shot screenshot on `/frame`.
  */
 export async function startScreencast(page: Page): Promise<void> {
+  if (!engineHasLiveView(readEngine())) {
+    return;
+  }
   if (attached === page && session !== null) {
     return;
   }

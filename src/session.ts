@@ -13,7 +13,8 @@
 
 import type { BrowserContext, Page } from "playwright";
 
-import { BrowserError, ensureContext } from "./browser.js";
+import { ensureContext } from "./browser.js";
+import { BrowserError } from "./errors.js";
 import { currentViewport, startScreencast, stopScreencast } from "./screencast.js";
 import { watchPage } from "./watch.js";
 

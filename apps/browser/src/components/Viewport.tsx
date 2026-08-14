@@ -4,6 +4,7 @@ import { fetchFrame, sendInput } from "../api";
 import type { Caret, FrameBody, InputResult, PointerButton } from "../api";
 
 interface Props {
+  liveView: boolean;
   onIdentity(next: { url: string; title: string; tabId: string }): void;
 }
 
@@ -28,7 +29,7 @@ const DBLCLICK_MS = 400;
  * from a data URL, then `drawImage` over the pixels already there. Replacing
  * an `<img src>` is what flashes the viewport's background between frames.
  */
-export function Viewport({ onIdentity }: Props) {
+export function Viewport({ liveView, onIdentity }: Props) {
   const stage = useRef<HTMLDivElement | null>(null);
   const canvas = useRef<HTMLCanvasElement | null>(null);
   const size = useRef({ width: 1280, height: 800 });
@@ -136,6 +137,10 @@ export function Viewport({ onIdentity }: Props) {
   }, []);
 
   useEffect(() => {
+    if (!liveView) {
+      setHasPicture(false);
+      return;
+    }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
 
@@ -185,7 +190,7 @@ export function Viewport({ onIdentity }: Props) {
       cancelled = true;
       clearTimeout(timer);
     };
-  }, []);
+  }, [liveView]);
 
   const point = (event: { clientX: number; clientY: number }): { x: number; y: number } => {
     const node = stage.current;
@@ -374,7 +379,14 @@ export function Viewport({ onIdentity }: Props) {
     >
       {hasPicture ? null : (
         <div class="viewport-fallback">
-          <p>Waiting for the page…</p>
+          {liveView ? (
+            <p>Waiting for the page…</p>
+          ) : (
+            <p>
+              This engine has no live page view. The assistant can still navigate
+              and extract from the current tab.
+            </p>
+          )}
         </div>
       )}
       <canvas ref={canvas} class="capture" />

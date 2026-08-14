@@ -6,7 +6,7 @@
  * human-readable reason and, where one exists, the concrete next step.
  */
 
-import { BrowserError } from "./browser.js";
+import { BrowserError } from "./errors.js";
 
 /** The error body every failing route returns. */
 export interface ErrorBody {

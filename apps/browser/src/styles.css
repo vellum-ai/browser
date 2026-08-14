@@ -79,6 +79,12 @@ body {
   cursor: default;
 }
 
+.icon-button.is-active {
+  background: var(--v-bg, #ffffff);
+  border-color: var(--v-surface-border, #d2d2d7);
+  color: var(--v-text, #1a1a1a);
+}
+
 /* ── Windows and tabs ────────────────────────────────────────────── */
 
 .windowbar,
@@ -289,6 +295,94 @@ body {
 .empty p {
   margin: 0;
   max-width: 46ch;
+}
+
+/* ── Settings ────────────────────────────────────────────────────── */
+
+.settings {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--v-spacing-lg, 16px) var(--v-spacing-md, 12px) var(--v-spacing-xxl, 32px);
+}
+
+.settings-header h1 {
+  margin: 0;
+  font-size: var(--v-font-size-xl, 22px);
+  font-weight: 600;
+}
+
+.settings-header p {
+  margin: var(--v-spacing-xs, 4px) 0 0;
+  color: var(--v-text-secondary, #4a4a4a);
+  max-width: 52ch;
+}
+
+.settings-section {
+  margin-top: var(--v-spacing-xl, 24px);
+}
+
+.settings-section h2 {
+  margin: 0 0 var(--v-spacing-sm, 8px);
+  font-size: var(--v-font-size-base, 14px);
+  font-weight: 600;
+}
+
+.engine-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--v-spacing-sm, 8px);
+}
+
+.engine-card {
+  display: flex;
+  gap: var(--v-spacing-md, 12px);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: var(--v-spacing-md, 12px);
+  border: 1px solid var(--v-surface-border, #d2d2d7);
+  border-radius: var(--v-radius-sm, 4px);
+  background: var(--v-surface, #f5f5f7);
+}
+
+.engine-card.is-default {
+  background: var(--v-bg, #ffffff);
+}
+
+.engine-copy h3 {
+  margin: 0;
+  font-size: var(--v-font-size-base, 14px);
+  font-weight: 600;
+}
+
+.engine-status {
+  margin: var(--v-spacing-xxs, 2px) 0 0;
+  font-size: var(--v-font-size-sm, 11px);
+  color: var(--v-text-secondary, #4a4a4a);
+}
+
+.engine-note {
+  margin: var(--v-spacing-xs, 4px) 0 0;
+  max-width: 46ch;
+  color: var(--v-text-secondary, #4a4a4a);
+}
+
+.engine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--v-spacing-xs, 4px);
+  justify-content: flex-end;
+  flex: none;
+}
+
+@media (max-width: 560px) {
+  .engine-card {
+    flex-direction: column;
+  }
+
+  .engine-actions {
+    justify-content: flex-start;
+  }
 }
 
 /* ── Live page ───────────────────────────────────────────────────── */
