@@ -46,7 +46,7 @@ export type PointerButton = "left" | "right" | "middle";
 export type Input =
   | { type: "wheel"; x: number; y: number; deltaX: number; deltaY: number }
   | { type: "move"; x: number; y: number }
-  | { type: "down"; x: number; y: number; button?: PointerButton }
+  | { type: "down"; x: number; y: number; button?: PointerButton; count?: number }
   | { type: "up"; x: number; y: number; button?: PointerButton }
   | { type: "click"; x: number; y: number; button?: PointerButton; count?: number }
   | { type: "key"; key: string }
@@ -162,10 +162,19 @@ export function fetchFrame(): Promise<FrameBody> {
   return request<FrameBody>("/frame");
 }
 
+export interface Caret {
+  x: number;
+  y: number;
+  height: number;
+}
+
 export interface InputResult {
   ok: true;
   width: number;
   height: number;
+  cursor?: string;
+  caret?: Caret | null;
+  href?: string | null;
 }
 
 /**

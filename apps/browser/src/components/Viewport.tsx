@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 
 import { fetchFrame, sendInput } from "../api";
-import type { FrameBody, PointerButton } from "../api";
+import type { Caret, FrameBody, InputResult, PointerButton } from "../api";
 
 interface Props {
   onIdentity(next: { url: string; title: string }): void;
@@ -23,18 +23,46 @@ const DBLCLICK_MS = 400;
  * Clicks are mapped through the size we last told Playwright to use, not the
  * JPEG's own dimensions. Those two disagree after a resize, and using the
  * picture size is how a click in the panel landed off the page.
+ *
+ * The JPEG is a bitmap. Page CSS never reaches the user's pointer, so the
+ * cursor and the text caret are applied here from a hit-test on the live DOM.
+ * A new frame decodes in a hidden buffer and is shown only after it has
+ * painted, so replacing `src` on the visible image cannot flash the
+ * viewport's background between frames.
  */
 export function Viewport({ onIdentity }: Props) {
   const stage = useRef<HTMLDivElement | null>(null);
   const size = useRef({ width: 1280, height: 800 });
+  const lastSize = useRef({ width: 0, height: 0 });
   const wheel = useRef({ x: 0, y: 0, deltaX: 0, deltaY: 0, pending: false });
   const move = useRef({ x: 0, y: 0, pending: false });
   const lastClickAt = useRef(0);
   const identityRef = useRef({ url: "", title: "" });
   const onIdentityRef = useRef(onIdentity);
   onIdentityRef.current = onIdentity;
+  const frontJpeg = useRef<string | null>(null);
+  const backJpeg = useRef<string | null>(null);
+  const frontOnTop = useRef(true);
+  const incomingJpeg = useRef<string | null>(null);
 
-  const [frame, setFrame] = useState<FrameBody | null>(null);
+  const [front, setFront] = useState<string | null>(null);
+  const [back, setBack] = useState<string | null>(null);
+  const [showFront, setShowFront] = useState(true);
+  const [title, setTitle] = useState("Current page");
+  const [cursor, setCursor] = useState("default");
+  const [caret, setCaret] = useState<Caret | null>(null);
+
+  const applyHit = (result: InputResult) => {
+    if (result.width > 0 && result.height > 0) {
+      size.current = { width: result.width, height: result.height };
+    }
+    if (typeof result.cursor === "string" && result.cursor !== "") {
+      setCursor(result.cursor);
+    }
+    if (result.caret !== undefined) {
+      setCaret(result.caret);
+    }
+  };
 
   useEffect(() => {
     const node = stage.current;
@@ -46,6 +74,13 @@ export function Viewport({ onIdentity }: Props) {
       if (width < 32 || height < 32) {
         return;
       }
+      if (
+        Math.abs(width - lastSize.current.width) < 8 &&
+        Math.abs(height - lastSize.current.height) < 8
+      ) {
+        return;
+      }
+      lastSize.current = { width, height };
       void sendInput({ type: "resize", width, height })
         .then((applied) => {
           size.current = { width: applied.width, height: applied.height };
@@ -76,14 +111,7 @@ export function Viewport({ onIdentity }: Props) {
         if (cancelled) {
           return;
         }
-        setFrame(next);
-        if (next.width > 0 && next.height > 0) {
-          size.current = { width: next.width, height: next.height };
-        }
-        if (next.url !== "" && (next.url !== identityRef.current.url || next.title !== identityRef.current.title)) {
-          identityRef.current = { url: next.url, title: next.title };
-          onIdentityRef.current(identityRef.current);
-        }
+        applyFrame(next);
       } catch {
         // The next tick retries. A dead browser surfaces through /status.
       } finally {
@@ -92,6 +120,37 @@ export function Viewport({ onIdentity }: Props) {
             void tick();
           }, FRAME_MS);
         }
+      }
+    };
+
+    const applyFrame = (next: FrameBody) => {
+      if (next.width > 0 && next.height > 0) {
+        size.current = { width: next.width, height: next.height };
+      }
+      if (next.url !== "" && (next.url !== identityRef.current.url || next.title !== identityRef.current.title)) {
+        identityRef.current = { url: next.url, title: next.title };
+        onIdentityRef.current(identityRef.current);
+      }
+      if (next.title !== "") {
+        setTitle(next.title);
+      }
+      if (next.screenshot === null || next.screenshot === "") {
+        return;
+      }
+      if (
+        next.screenshot === frontJpeg.current ||
+        next.screenshot === backJpeg.current ||
+        next.screenshot === incomingJpeg.current
+      ) {
+        return;
+      }
+      incomingJpeg.current = next.screenshot;
+      if (frontOnTop.current) {
+        backJpeg.current = next.screenshot;
+        setBack(next.screenshot);
+      } else {
+        frontJpeg.current = next.screenshot;
+        setFront(next.screenshot);
       }
     };
 
@@ -126,9 +185,11 @@ export function Viewport({ onIdentity }: Props) {
     const { x, y, deltaX, deltaY } = queued;
     queued.deltaX = 0;
     queued.deltaY = 0;
-    void sendInput({ type: "wheel", x, y, deltaX, deltaY }).catch(() => {
-      // The next wheel event retries.
-    });
+    void sendInput({ type: "wheel", x, y, deltaX, deltaY })
+      .then(applyHit)
+      .catch(() => {
+        // The next wheel event retries.
+      });
   };
 
   const flushMove = () => {
@@ -137,9 +198,11 @@ export function Viewport({ onIdentity }: Props) {
       return;
     }
     queued.pending = false;
-    void sendInput({ type: "move", x: queued.x, y: queued.y }).catch(() => {
-      // The next move retries.
-    });
+    void sendInput({ type: "move", x: queued.x, y: queued.y })
+      .then(applyHit)
+      .catch(() => {
+        // The next move retries.
+      });
   };
 
   useEffect(() => {
@@ -205,6 +268,23 @@ export function Viewport({ onIdentity }: Props) {
     return parts.join("+");
   };
 
+  const clickCount = (): number => {
+    const now = Date.now();
+    const count = now - lastClickAt.current < DBLCLICK_MS ? 2 : 1;
+    lastClickAt.current = now;
+    return count;
+  };
+
+  const caretStyle = (mark: Caret): { left: string; top: string; height: string } => {
+    const width = size.current.width || 1;
+    const height = size.current.height || 1;
+    return {
+      left: `${(mark.x / width) * 100}%`,
+      top: `${(mark.y / height) * 100}%`,
+      height: `${(mark.height / height) * 100}%`,
+    };
+  };
+
   return (
     <div
       ref={stage}
@@ -212,6 +292,7 @@ export function Viewport({ onIdentity }: Props) {
       tabIndex={0}
       role="application"
       aria-label="Page"
+      style={{ cursor }}
       onContextMenu={(event) => event.preventDefault()}
       onMouseMove={(event) => {
         const at = point(event);
@@ -225,21 +306,32 @@ export function Viewport({ onIdentity }: Props) {
       onMouseDown={(event) => {
         event.preventDefault();
         stage.current?.focus();
-      }}
-      onMouseUp={(event) => {
+        move.current.pending = false;
         const at = point(event);
-        const now = Date.now();
-        const count = now - lastClickAt.current < DBLCLICK_MS ? 2 : 1;
-        lastClickAt.current = now;
         void sendInput({
-          type: "click",
+          type: "down",
           x: at.x,
           y: at.y,
           button: buttonOf(event),
-          count,
-        }).catch(() => {
-          // The next click retries.
-        });
+          count: clickCount(),
+        })
+          .then(applyHit)
+          .catch(() => {
+            // The next press retries.
+          });
+      }}
+      onMouseUp={(event) => {
+        const at = point(event);
+        void sendInput({
+          type: "up",
+          x: at.x,
+          y: at.y,
+          button: buttonOf(event),
+        })
+          .then(applyHit)
+          .catch(() => {
+            // The next release retries.
+          });
       }}
       onKeyDown={(event) => {
         const key = keyOf(event);
@@ -247,24 +339,51 @@ export function Viewport({ onIdentity }: Props) {
           return;
         }
         event.preventDefault();
-        void sendInput({ type: "key", key }).catch(() => {
-          // The next key retries.
-        });
+        void sendInput({ type: "key", key })
+          .then(applyHit)
+          .catch(() => {
+            // The next key retries.
+          });
       }}
     >
-      {frame?.screenshot ? (
-        <img
-          class="capture"
-          src={`data:image/jpeg;base64,${frame.screenshot}`}
-          alt={frame.title === "" ? "Current page" : frame.title}
-          draggable={false}
-          decoding="async"
-        />
-      ) : (
+      {front === null && back === null ? (
         <div class="viewport-fallback">
           <p>Waiting for the page…</p>
         </div>
-      )}
+      ) : null}
+      {front !== null ? (
+        <img
+          class={showFront ? "capture" : "capture is-hidden"}
+          src={`data:image/jpeg;base64,${front}`}
+          alt={showFront ? (title === "" ? "Current page" : title) : ""}
+          draggable={false}
+          onLoad={() => {
+            if (frontOnTop.current || incomingJpeg.current !== frontJpeg.current) {
+              return;
+            }
+            incomingJpeg.current = null;
+            frontOnTop.current = true;
+            setShowFront(true);
+          }}
+        />
+      ) : null}
+      {back !== null ? (
+        <img
+          class={showFront ? "capture is-hidden" : "capture"}
+          src={`data:image/jpeg;base64,${back}`}
+          alt={showFront ? "" : title === "" ? "Current page" : title}
+          draggable={false}
+          onLoad={() => {
+            if (!frontOnTop.current || incomingJpeg.current !== backJpeg.current) {
+              return;
+            }
+            incomingJpeg.current = null;
+            frontOnTop.current = false;
+            setShowFront(false);
+          }}
+        />
+      ) : null}
+      {caret !== null ? <div class="caret" style={caretStyle(caret)} /> : null}
     </div>
   );
 }

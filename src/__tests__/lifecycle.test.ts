@@ -73,9 +73,10 @@ describe("the app is a live view, not a screenshot picker", () => {
     expect(existsSync(join(ROOT, "routes/view.ts"))).toBe(false);
   });
 
-  test("clicks the page as one Playwright click, in the panel's own size", () => {
+  test("maps pointer events through the panel's own size", () => {
     const viewport = source("apps/browser/src/components/Viewport.tsx");
-    expect(viewport).toContain('type: "click"');
+    expect(viewport).toContain('type: "down"');
+    expect(viewport).toContain('type: "up"');
     expect(viewport).toContain("size.current.width");
     expect(viewport).not.toContain("frameRef");
     expect(source("apps/browser/src/api.ts")).toContain("inputChain");
@@ -84,6 +85,23 @@ describe("the app is a live view, not a screenshot picker", () => {
       /import\s*\{[^}]*requireNumber[^}]*\}\s*from\s*["'].*http/,
     );
     expect(source("routes/frame.ts")).toContain("currentViewport()");
+  });
+
+  test("keeps the last JPEG up while the next one decodes", () => {
+    const viewport = source("apps/browser/src/components/Viewport.tsx");
+    expect(viewport).toContain("is-hidden");
+    expect(viewport).toContain("incomingJpeg");
+    expect(source("apps/browser/src/styles.css")).toContain(".capture.is-hidden");
+    expect(source("apps/browser/src/styles.css")).toContain(".caret");
+  });
+
+  test("reads the page cursor and follows a link the click did not", () => {
+    expect(source("src/hit.ts")).toContain("elementFromPoint");
+    expect(source("src/hit.ts")).toContain("normalizeCursor");
+    expect(source("src/watch.ts")).toContain("framenavigated");
+    expect(source("src/watch.ts")).toContain("followHref");
+    expect(source("routes/input.ts")).toContain("followHref");
+    expect(source("apps/browser/src/components/Viewport.tsx")).toContain("style={{ cursor }}");
   });
 });
 

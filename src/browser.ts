@@ -34,6 +34,7 @@ import type { Browser, BrowserContext, Page } from "playwright";
 import { chromium } from "playwright";
 
 import { DEFAULT_VIEWPORT, startScreencast, stopScreencast } from "./screencast.js";
+import { watchPage } from "./watch.js";
 
 /** How long the on-demand Chrome for Testing download is allowed to take. */
 const BROWSER_INSTALL_TIMEOUT_MS = 300_000;
@@ -415,8 +416,8 @@ export function isStarting(): boolean {
  * The page the app drives.
  *
  * One page, reused: the app is a single browser tab, and a persistent context
- * opens with one already. Pages the site opens itself (`target="_blank"`, a
- * popup) are left alone — surfacing them is what a tab strip would be for.
+ * opens with one already. A popup (`target="_blank"`) has nowhere else to go,
+ * so its URL is loaded in this page.
  */
 export async function ensurePage(): Promise<Page> {
   const ctx = await ensureContext();
@@ -424,6 +425,7 @@ export async function ensurePage(): Promise<Page> {
   const page =
     existing !== undefined && !existing.isClosed() ? existing : await ctx.newPage();
   await startScreencast(page);
+  watchPage(page);
   return page;
 }
 
