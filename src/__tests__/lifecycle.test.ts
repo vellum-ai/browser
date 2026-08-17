@@ -137,4 +137,26 @@ describe("the chrome has windows, tabs, and the address bar", () => {
     expect(source("routes/start.ts")).toContain("ensureSession");
     expect(existsSync(join(ROOT, "routes/session.ts"))).toBe(true);
   });
+
+  test("has browser settings with Chromium Debugging and Lightpanda", () => {
+    expect(source("apps/browser/src/components/AddressBar.tsx")).toContain("Browser settings");
+    expect(source("apps/browser/src/components/Settings.tsx")).toContain("Chromium Debugging");
+    expect(source("apps/browser/src/components/Settings.tsx")).toContain("Lightpanda");
+    expect(source("apps/browser/src/components/Settings.tsx")).toContain("Set as default");
+    expect(source("apps/browser/src/components/Settings.tsx")).toContain("Install");
+    expect(source("apps/browser/src/components/Settings.tsx")).toContain("Uninstall");
+    expect(existsSync(join(ROOT, "routes/engines.ts"))).toBe(true);
+  });
+});
+
+describe("the assistant uses this plugin's browser, not assistant browser", () => {
+  test("ships a skill that calls plugin routes and forbids the CLI", () => {
+    const skill = source("skills/browser/SKILL.md");
+    expect(skill).toContain("Never** use `assistant browser`");
+    expect(skill).toContain("bun scripts/browser.ts");
+    expect(source("skills/browser/scripts/browser.ts")).toContain("/v1/x/plugins/browser");
+    expect(source("skills/browser/scripts/browser.ts")).not.toContain("assistant browser");
+    expect(existsSync(join(ROOT, "routes/snapshot.ts"))).toBe(true);
+    expect(existsSync(join(ROOT, "routes/element.ts"))).toBe(true);
+  });
 });

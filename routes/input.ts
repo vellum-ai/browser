@@ -9,7 +9,7 @@
  * the response is sent, so a click cannot hold the input lock for a navigation.
  */
 
-import { BrowserError } from "../src/browser.js";
+import { BrowserError } from "../src/errors.js";
 import { hitTest } from "../src/hit.js";
 import {
   handle,

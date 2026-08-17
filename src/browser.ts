@@ -1,11 +1,15 @@
 /**
- * The plugin's browser: one Playwright Chromium, launched once and held.
+ * The plugin's browser: one Playwright session, launched once and held.
  *
  * Playwright is a direct dependency and is driven in-process. That makes the
  * page a live object rather than something addressed one subprocess at a time,
  * which is what lets the app offer real history navigation and clicks at a
- * coordinate — both of which the page simply has, and neither of which survives
+ * coordinate, both of which the page simply has, and neither of which survives
  * being marshalled through a command per step.
+ *
+ * The default engine is Chromium Debugging: a persistent Chromium context
+ * with a live CDP screencast. Lightpanda is an optional headless CDP server
+ * the user installs from Browser settings.
  *
  * ## Lifecycle
  *
@@ -27,47 +31,26 @@
  */
 
 import { existsSync, mkdirSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 
 import type { Browser, BrowserContext } from "playwright";
 import { chromium } from "playwright";
 
+import { readEngine } from "./engine-config.js";
+import { BrowserError } from "./errors.js";
+import {
+  isLightpandaInstalling,
+  startLightpanda,
+  stopLightpanda,
+} from "./lightpanda.js";
+import { PLUGIN_DIR, PROFILE_DIR } from "./paths.js";
 import { DEFAULT_VIEWPORT, stopScreencast } from "./screencast.js";
+
+export { BrowserError };
 
 /** How long the on-demand Chrome for Testing download is allowed to take. */
 const BROWSER_INSTALL_TIMEOUT_MS = 300_000;
 
-/**
- * This module sits at `<pluginDir>/src/browser.ts`, so the plugin root is two
- * levels up. Resolved from the module's own URL rather than the process CWD,
- * which belongs to the daemon.
- */
-const PLUGIN_DIR = dirname(dirname(fileURLToPath(import.meta.url)));
-
-/**
- * The browser profile lives under the plugin's `data/` directory — the one
- * place a plugin owns durable state, and the reason logins survive a restart.
- * Removing the plugin removes the profile with it.
- */
-const PROFILE_DIR = join(PLUGIN_DIR, "data", "profile");
-
-/** Raised for anything that stops an operation from producing a result. */
-export class BrowserError extends Error {
-  /** HTTP status a route should answer with. */
-  readonly status: number;
-  /** Remediation hint, when there is a concrete next step. */
-  readonly hint?: string;
-
-  constructor(message: string, options: { status?: number; hint?: string } = {}) {
-    super(message);
-    this.name = "BrowserError";
-    this.status = options.status ?? 502;
-    if (options.hint !== undefined) {
-      this.hint = options.hint;
-    }
-  }
-}
 
 // ── Chrome resolution ────────────────────────────────────────────────
 
@@ -268,6 +251,7 @@ async function installChromeForTesting(): Promise<void> {
 // ── The singleton ────────────────────────────────────────────────────
 
 let context: BrowserContext | null = null;
+let cdpBrowser: Browser | null = null;
 let launching: Promise<BrowserContext> | null = null;
 let installing: Promise<void> | null = null;
 
@@ -281,14 +265,32 @@ let installing: Promise<void> | null = null;
 let lastError: BrowserError | null = null;
 
 /**
- * Launch the persistent context.
+ * Launch the configured engine.
  *
- * A persistent context rather than a plain browser: it keeps cookies, storage,
- * and logins in `data/profile`, so a page you signed into is still signed in
- * after a restart. Which is the behavior anyone expects from something calling
- * itself a browser.
+ * Chromium Debugging uses a persistent context so cookies and logins survive
+ * a restart. Lightpanda is a CDP server Playwright connects to; it has no
+ * profile directory of its own.
  */
 async function launch(): Promise<BrowserContext> {
+  if (readEngine() === "lightpanda") {
+    return launchLightpandaContext();
+  }
+  return launchChromiumContext();
+}
+
+async function launchLightpandaContext(): Promise<BrowserContext> {
+  const { host, port } = await startLightpanda();
+  const browser = await chromium.connectOverCDP(`http://${host}:${port}`);
+  cdpBrowser = browser;
+  const existing = browser.contexts()[0];
+  const next = existing ?? (await browser.newContext({ viewport: { ...DEFAULT_VIEWPORT } }));
+  if (next.pages().length === 0) {
+    await next.newPage();
+  }
+  return next;
+}
+
+async function launchChromiumContext(): Promise<BrowserContext> {
   mkdirSync(PROFILE_DIR, { recursive: true });
   const headless = !canDisplayGui();
   const options = { headless, viewport: { ...DEFAULT_VIEWPORT } };
@@ -380,6 +382,7 @@ export async function ensureContext(): Promise<BrowserContext> {
       // relaunches instead of driving a dead handle.
       launched.on("close", () => {
         context = null;
+        cdpBrowser = null;
       });
       return launched;
     })
@@ -408,7 +411,7 @@ export function getLastError(): { message: string; hint: string | null } | null 
 
 /** True while an install or launch is in progress, so the app can say so rather than guess. */
 export function isStarting(): boolean {
-  return launching !== null || installing !== null;
+  return launching !== null || installing !== null || isLightpandaInstalling();
 }
 
 /** True when the browser is up. Read by the status route; never launches. */
@@ -430,16 +433,25 @@ export function describeBrowser(): { source: BrowserSource } {
  */
 export async function closeBrowser(): Promise<void> {
   const open = context;
+  const remote = cdpBrowser;
   context = null;
+  cdpBrowser = null;
   await stopScreencast();
-  if (open === null) {
-    return;
+  if (open !== null) {
+    try {
+      await open.close();
+    } catch {
+      // Already gone, or the process died underneath us. Nothing left to do.
+    }
   }
-  try {
-    await open.close();
-  } catch {
-    // Already gone, or the process died underneath us. Nothing left to do.
+  if (remote !== null) {
+    try {
+      await remote.close();
+    } catch {
+      // Disconnect is enough; the Lightpanda process is stopped next.
+    }
   }
+  await stopLightpanda();
 }
 
 /** The underlying browser, when the context exposes one. Used only for logging. */

@@ -5,7 +5,8 @@
  * tab or a window. There is always at least one window and at least one tab.
  */
 
-import { BrowserError, isRunning } from "../src/browser.js";
+import { isRunning } from "../src/browser.js";
+import { BrowserError } from "../src/errors.js";
 import { handle, ok, optionalString, readJson, requireString } from "../src/http.js";
 import { exclusive } from "../src/lock.js";
 import {

@@ -11,6 +11,8 @@ interface Props {
   onBack(): void;
   onForward(): void;
   onReload(): void;
+  inSettings: boolean;
+  onToggleSettings(): void;
 }
 
 /**
@@ -39,6 +41,8 @@ export function AddressBar({
   onBack,
   onForward,
   onReload,
+  inSettings,
+  onToggleSettings,
 }: Props) {
   const [draft, setDraft] = useState(value);
   const input = useRef<HTMLInputElement | null>(null);
@@ -120,6 +124,16 @@ export function AddressBar({
           }
         }}
       />
+      <button
+        type="button"
+        class={inSettings ? "icon-button is-active" : "icon-button"}
+        onClick={onToggleSettings}
+        aria-label={inSettings ? "Back to browser" : "Browser settings"}
+        title={inSettings ? "Back to browser" : "Browser settings"}
+        aria-pressed={inSettings}
+      >
+        {inSettings ? <BackIcon /> : <GearIcon />}
+      </button>
     </div>
   );
 }
@@ -130,6 +144,36 @@ function Chevron({ direction }: { direction: "left" | "right" }) {
     <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
       <path
         d={path}
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.6"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+      <path
+        d="M6.5 2.2 7 1h2l.5 1.2 1.3.5 1.1-1L12.9 3l-1 1.1.5 1.3L14 6v2l-1.2.5-.5 1.3 1 1.1L12 12.9l-1.1-1-.5 1.3L9 14H7l-.5-1.2-1.3-.5-1.1 1L2.1 12l1-1.1-.5-1.3L1 8V6l1.2-.5.5-1.3-1-1.1L3 2.1l1.1 1 .5-1.3Z"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="1.2"
+        stroke-linejoin="round"
+      />
+      <circle cx="8" cy="8" r="2.1" fill="none" stroke="currentColor" stroke-width="1.2" />
+    </svg>
+  );
+}
+
+function BackIcon() {
+  return (
+    <svg viewBox="0 0 16 16" width="16" height="16" aria-hidden="true" focusable="false">
+      <path
+        d="M10 3 5 8l5 5"
         fill="none"
         stroke="currentColor"
         stroke-width="1.6"

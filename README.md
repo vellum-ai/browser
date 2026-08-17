@@ -104,13 +104,18 @@ does not need an assistant restart to recover.
 - **Tabs and windows**: add and close both. There is always at least one
   window and at least one tab. A `target="_blank"` popup becomes a tab in the
   window that opened it.
+- **Settings**: the gear opens Browser settings. Engines picks Chromium
+  Debugging (the default, always installed) or Lightpanda (optional install).
+  Lightpanda is headless and has no live page view.
 - **Back / forward / reload**: the page's real history.
 
 ## Configuration
 
-None. The plugin ships no `config.json` and reads no settings: it launches a
-browser, keeps its profile in `data/`, and searches with DuckDuckGo. Anything
-worth varying can become a setting when there is a reason for it.
+The default engine is Chromium Debugging. Browser settings can switch it to
+Lightpanda, which writes `{ "engine": "lightpanda" }` to the plugin's
+`config.json`. Lightpanda is an optional AGPL binary downloaded into `data/`
+on Install; it is not a package dependency. The Chromium profile still lives
+in `data/profile`. Search is DuckDuckGo.
 
 ## Routes
 
@@ -128,6 +133,10 @@ URL and no auth and fails.
 | `/act`      | POST   | `{ action }`: back, forward, or reload.                                          |
 | `/session`  | GET    | Windows and tabs. Empty when the browser is not running.                         |
 | `/session`  | POST   | `{ action }`: new-tab, close-tab, select-tab, new-window, close-window, select-window. At least one window and one tab remain. |
+| `/engines`  | GET    | Installed engines and the default.                                               |
+| `/engines`  | POST   | `{ action, engine }`: install, uninstall, or set-default. Chromium Debugging cannot be uninstalled. |
+| `/snapshot` | GET    | Interactive elements on the page, for the assistant.                             |
+| `/element`  | POST   | `{ action, eid, text? }`: click or type a snapshotted element.                   |
 | `/extract`  | GET    | Page text, for the assistant. `?includeLinks=1` appends its links.                |
 | `/close`    | POST   | Shut the browser down. The profile is kept.                                      |
 
@@ -190,8 +199,9 @@ and served on the next open. `dist/` is generated — never commit it.
 
 ## Not in this version
 
-- **A model-visible tool.** The assistant cannot yet open this app or hand it a
-  URL from a conversation.
+- **A model-visible tool.** The assistant drives this browser through the
+  plugin skill (`skills/browser/`) and its HTTP routes, not through a catalog
+  tool.
 - **A marketplace listing.** Install from the repo URL until an entry lands in
   `plugins/marketplace.json` upstream.
 

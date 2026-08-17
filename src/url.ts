@@ -6,7 +6,7 @@
  * the browser, which only takes URLs.
  */
 
-import { BrowserError } from "./browser.js";
+import { BrowserError } from "./errors.js";
 
 /**
  * Schemes the app will navigate to.

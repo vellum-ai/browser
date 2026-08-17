@@ -13,6 +13,7 @@ import type { HistoryAction, SessionInfo, StatusBody } from "../api";
 import { AddressBar } from "./AddressBar";
 import { TabBar, WindowBar } from "./Chrome";
 import { ErrorBanner } from "./ErrorBanner";
+import { Settings } from "./Settings";
 import { StartupBanner } from "./StartupBanner";
 import { Viewport } from "./Viewport";
 
@@ -34,6 +35,7 @@ export function App() {
   const [error, setError] = useState<ApiError | null>(null);
   const [busy, setBusy] = useState(false);
   const [starting, setStarting] = useState(false);
+  const [inSettings, setInSettings] = useState(false);
 
   const applyUrl = useCallback((url: string) => {
     if (url !== "") {
@@ -164,7 +166,7 @@ export function App() {
 
   return (
     <div class="shell">
-      {running && session.windows.length > 0 && (
+      {running && !inSettings && session.windows.length > 0 && (
         <WindowBar
           windows={session.windows}
           onSelect={(id) => changeSession(() => mutateSession({ action: "select-window", windowId: id }))}
@@ -172,7 +174,7 @@ export function App() {
           onClose={(id) => changeSession(() => mutateSession({ action: "close-window", windowId: id }))}
         />
       )}
-      {running && session.windows.length > 0 && (
+      {running && !inSettings && session.windows.length > 0 && (
         <TabBar
           tabs={tabs}
           canCloseTab={canCloseTab}
@@ -188,12 +190,14 @@ export function App() {
       <AddressBar
         value={address}
         busy={busy}
-        canNavigate={running}
+        canNavigate={running && !inSettings}
         onChange={setAddress}
         onSubmit={go}
         onBack={() => perform("back")}
         onForward={() => perform("forward")}
         onReload={() => perform("reload")}
+        inSettings={inSettings}
+        onToggleSettings={() => setInSettings((open) => !open)}
       />
 
       {!running && status !== null && (
@@ -201,9 +205,12 @@ export function App() {
       )}
       {error !== null && <ErrorBanner error={error} onDismiss={() => setError(null)} />}
 
-      {running && session.activeTabId !== "" ? (
+      {inSettings ? (
+        <Settings onStatus={setStatus} onError={(err) => setError(asApiError(err))} />
+      ) : running && session.activeTabId !== "" ? (
         <Viewport
           key={session.activeTabId}
+          liveView={status?.liveView !== false}
           onIdentity={(next) => {
             applyUrl(next.url);
             if (next.tabId !== "" && next.tabId !== session.activeTabId) {
